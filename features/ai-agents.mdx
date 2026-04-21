@@ -1,0 +1,116 @@
+---
+title: "AI Agents: Auto-Summarize and Tag Collected Content"
+description: "Configure AI agents to auto-analyze collected records: generate summaries, apply tags using Claude, OpenAI-compatible APIs, or a local Ollama/vLLM model."
+---
+
+AI agents run automatically after each collection task completes. For every new record that clears the normalization and deduplication steps, an enabled AI agent reads the normalized content, runs it through a configurable prompt, and writes a structured analysis back to the record's `ai_enrichment` field. This means your collected data arrives already labeled and summarized, ready to read or forward to a notification channel.
+
+## What AI agents produce
+
+Each agent produces a JSON object stored in `ai_enrichment` on the record. A typical output looks like:
+
+```json
+{
+  "summary": "A brief human-readable summary of the article content.",
+  "tags": ["technology", "open-source", "LLM"],
+  "sentiment": "positive"
+}
+```
+
+The exact fields depend on your prompt template. The `summary` and `tags` keys are conventional — you can instruct the model to return any structure you need.
+
+## Supported providers
+
+<CardGroup cols={2}>
+  <Card title="Claude (processor_type: claude)" icon="a">
+    Use `claude-3-5-sonnet-20241022` or any other Claude model. Requires an `ANTHROPIC_API_KEY` environment variable or a saved provider credential.
+  </Card>
+  <Card title="OpenAI (processor_type: openai)" icon="brain">
+    Supports GPT-4o and other OpenAI chat models. Requires `OPENAI_API_KEY`. Also used for all OpenAI-compatible providers below.
+  </Card>
+  <Card title="DeepSeek (processor_type: openai)" icon="magnifying-glass">
+    Set `processor_type: openai`, `base_url: https://api.deepseek.com/v1`, and a DeepSeek API key in `processor_config`. Strong multilingual performance.
+  </Card>
+  <Card title="Kimi / Moonshot (processor_type: openai)" icon="moon">
+    Set `processor_type: openai`, `base_url: https://api.moonshot.cn/v1`. Optimized for long-context Chinese text.
+  </Card>
+  <Card title="GLM / Zhipu (processor_type: openai)" icon="microchip">
+    Set `processor_type: openai`, `base_url: https://open.bigmodel.cn/api/paas/v4`. Covers GLM-4 and GLM-4-Flash models.
+  </Card>
+  <Card title="MiniMax (processor_type: openai)" icon="atom">
+    Set `processor_type: openai` with the MiniMax OpenAI-compatible endpoint and API key.
+  </Card>
+  <Card title="Local Ollama/vLLM (processor_type: local)" icon="server">
+    Run any model locally via Ollama or vLLM — no external API key required. Default endpoint: `http://localhost:11434`. Supports both Ollama and OpenAI-compatible API styles via `api_style` in `processor_config`.
+  </Card>
+</CardGroup>
+
+## Creating an AI agent
+
+<Steps>
+  <Step title="Open AI Agents">
+    Navigate to **AI Agents** in the sidebar. Existing agents are listed with their provider, model, and enabled state.
+  </Step>
+  <Step title="Click Add agent">
+    Click **Add agent**. A form opens.
+  </Step>
+  <Step title="Enter a name and description">
+    Give the agent a descriptive name (e.g. `DeepSeek — Chinese news tagger`) and an optional description so you know what it does at a glance.
+  </Step>
+  <Step title="Select a provider">
+    Set **Processor type** to one of: `claude` (Anthropic), `openai` (OpenAI and all OpenAI-compatible providers including DeepSeek, Kimi, GLM, MiniMax), or `local` (Ollama/vLLM running locally).
+  </Step>
+  <Step title="Enter the model name">
+    Specify the exact model identifier (e.g. `claude-3-5-sonnet-20241022`, `gpt-4o`, `deepseek-chat`). Leave blank to use the provider's default.
+  </Step>
+  <Step title="Write a prompt template">
+    Write the system or user prompt the agent will send along with each record's content. Use `{{title}}`, `{{content}}`, `{{url}}`, and other normalized fields as placeholders. Example:
+
+    ```
+    You are a content analyst. Given the article below, return a JSON object
+    with "summary" (2–3 sentences) and "tags" (array of up to 5 keyword strings).
+
+    Title: {{title}}
+    Content: {{content}}
+    ```
+  </Step>
+  <Step title="Link a provider credential (optional)">
+    If you have saved API credentials under **Providers**, select the matching provider from the **Provider** dropdown. Otherwise, the agent falls back to the corresponding environment variable.
+  </Step>
+  <Step title="Save">
+    Click **Save**. The agent is enabled immediately and will run on the next completed collection task.
+  </Step>
+</Steps>
+
+## Agent configuration fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Human-readable label (up to 255 chars) |
+| `description` | string | No | Optional notes |
+| `processor_type` | string | Yes | Provider: `claude`, `openai`, or `local`. Use `openai` with a custom `base_url` for DeepSeek, Kimi, GLM, MiniMax, etc. |
+| `model` | string | No | Exact model identifier; uses provider default if omitted |
+| `prompt_template` | string | No | Prompt sent to the model with record fields substituted in |
+| `processor_config` | object | No | Provider-specific extra settings (e.g. Ollama endpoint, temperature) |
+| `enabled` | boolean | No | Whether this agent runs automatically. Defaults to `true` |
+| `provider_id` | string | No | ID of a saved ModelProvider credential to use |
+
+## Multiple agents
+
+You can create several AI agents, each with a different provider or prompt. All enabled agents run sequentially for every record. This lets you, for example, run a summarization agent alongside a separate classification agent that uses a different model.
+
+<Tip>
+  Use different prompt templates to get structured outputs suitable for downstream notification templates. For example, one agent can produce a `summary` field and another can produce a `category` field, both stored in `ai_enrichment` and available as `{{summary}}` and `{{category}}` in notification messages.
+</Tip>
+
+## Triggering AI analysis manually
+
+If AI processing did not run automatically (e.g. no agent was enabled at collection time), you can re-trigger it per record from the **Records** page. Expand the record row and click **Run AI analysis**. This sends the record through all currently enabled agents.
+
+## Where AI output appears
+
+After an agent runs, the record's `status` advances to `ai_processed` and the `ai_enrichment` field is populated. You can see the full enrichment JSON in the expanded record view on the **Records** page. Notification templates can reference these fields using `{{summary}}`, `{{tags}}`, and any other keys your prompt returns.
+
+<Note>
+  AI enrichment is stored per record and is never overwritten by subsequent runs of the same agent. If you update the agent's prompt, new records will use the new prompt; existing records retain their original enrichment unless you manually retrigger analysis.
+</Note>

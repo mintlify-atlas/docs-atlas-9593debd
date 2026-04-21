@@ -1,0 +1,58 @@
+---
+title: "API Key Authentication Using the X-API-Key Request Header"
+description: "How to enable API key authentication for the OpenCLI Admin API, configure the secret in your environment file, and pass it on every request."
+---
+
+By default, the OpenCLI Admin API requires no authentication — all endpoints are accessible without credentials. When you need to restrict access, you can enable API key authentication through two environment variables in your `.env` file.
+
+## Enabling authentication
+
+Set both variables before starting the server:
+
+```bash .env
+API_KEY_ENABLED=true
+API_KEY=your-secret-key-here
+```
+
+With `API_KEY_ENABLED=false` (the default), the `API_KEY` value is ignored and all requests are accepted.
+
+## Sending the API key
+
+When authentication is enabled, include the key in the `X-API-Key` request header:
+
+```bash
+curl http://localhost:8031/api/v1/sources \
+  -H "X-API-Key: your-secret-key-here"
+```
+
+Requests that omit the header or provide an incorrect key receive a `401 Unauthorized` response:
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": "Unauthorized"
+}
+```
+
+## Choosing a key
+
+<Note>
+Use a long, randomly generated string for `API_KEY` in production. The `.env.example` placeholder `change-me-in-production-use-long-random-string` is not a suitable key.
+</Note>
+
+You can generate a secure key with:
+
+```bash
+openssl rand -hex 32
+```
+
+## Disabling authentication
+
+To turn off authentication without removing the key from your environment, set:
+
+```bash .env
+API_KEY_ENABLED=false
+```
+
+The server reads this setting at startup, so restart the API process after any change to these variables.

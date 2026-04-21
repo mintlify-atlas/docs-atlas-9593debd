@@ -1,0 +1,180 @@
+---
+title: "OpenCLI Admin REST API — Overview and Endpoint Index"
+description: "Base URL, standard response envelope, pagination conventions, HTTP error codes, and a complete index of every endpoint in the OpenCLI Admin API."
+---
+
+The OpenCLI Admin API is a REST API built with FastAPI. All endpoints are served under the base URL `http://localhost:8031/api/v1` and return JSON. An interactive Swagger UI is available at `http://localhost:8031/docs` where you can explore and try every endpoint directly in the browser.
+
+## Response envelope
+
+Every response is wrapped in a standard `ApiResponse` envelope regardless of the endpoint.
+
+<ResponseField name="success" type="boolean" required>
+  `true` when the request succeeded, `false` on error.
+</ResponseField>
+
+<ResponseField name="data" type="any">
+  The response payload. Type varies by endpoint. `null` on error responses.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Human-readable error message. Only present when `success` is `false`.
+</ResponseField>
+
+<ResponseField name="meta" type="object">
+  Pagination metadata. Only present on list endpoints.
+  <Expandable title="properties">
+    <ResponseField name="total" type="integer">
+      Total number of matching records across all pages.
+    </ResponseField>
+    <ResponseField name="page" type="integer">
+      Current page number (1-indexed).
+    </ResponseField>
+    <ResponseField name="limit" type="integer">
+      Number of items per page.
+    </ResponseField>
+    <ResponseField name="pages" type="integer">
+      Total number of pages.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json Example success response
+{
+  "success": true,
+  "data": [...],
+  "meta": {
+    "total": 42,
+    "page": 1,
+    "limit": 20,
+    "pages": 3
+  }
+}
+```
+
+```json Example error response
+{
+  "success": false,
+  "data": null,
+  "error": "Source not found"
+}
+```
+
+## Pagination
+
+List endpoints accept `page` and `limit` query parameters to control pagination.
+
+<ParamField query="page" type="integer" default="1">
+  Page number to retrieve. Must be greater than or equal to 1.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="20">
+  Number of items per page. Accepts values from 1 to 100.
+</ParamField>
+
+## Error codes
+
+| Status | Meaning |
+|--------|---------|
+| `400 Bad Request` | Invalid input, such as a disabled source or an invalid field value. |
+| `401 Unauthorized` | Missing or invalid API key (when authentication is enabled). |
+| `404 Not Found` | The requested resource does not exist. |
+| `422 Unprocessable Entity` | Request body failed validation (e.g., invalid cron expression). |
+
+## Endpoint index
+
+### Dashboard
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/dashboard/stats` | Overall statistics for sources, tasks, runs, and records. |
+| `GET` | `/api/v1/dashboard/activity` | Per-day task run and record counts for the past N days. |
+
+### Sources
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/sources` | List data sources with optional filters. |
+| `POST` | `/api/v1/sources` | Create a new data source. |
+| `GET` | `/api/v1/sources/{source_id}` | Retrieve a single source with connectivity status. |
+| `PATCH` | `/api/v1/sources/{source_id}` | Update a source. |
+| `DELETE` | `/api/v1/sources/{source_id}` | Delete a source. |
+| `POST` | `/api/v1/sources/{source_id}/test` | Test connectivity for a source. |
+
+### Schedules
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/schedules` | List cron schedules with optional filters. |
+| `POST` | `/api/v1/schedules` | Create a new cron schedule. |
+| `GET` | `/api/v1/schedules/{schedule_id}` | Retrieve a single schedule. |
+| `PATCH` | `/api/v1/schedules/{schedule_id}` | Update a schedule. |
+| `DELETE` | `/api/v1/schedules/{schedule_id}` | Delete a schedule. |
+
+### Tasks
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/tasks` | List collection tasks with optional filters. |
+| `POST` | `/api/v1/tasks/trigger` | Manually trigger a collection task. |
+| `GET` | `/api/v1/tasks/{task_id}` | Retrieve a single task. |
+| `GET` | `/api/v1/tasks/{task_id}/runs` | List all runs for a task. |
+| `GET` | `/api/v1/tasks/{task_id}/runs/{run_id}/events` | List execution trace events for a run. |
+
+### Records
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/records` | List collected records with search and filters. |
+| `GET` | `/api/v1/records/{record_id}` | Retrieve a single record. |
+| `DELETE` | `/api/v1/records/{record_id}` | Delete a single record. |
+| `POST` | `/api/v1/records/batch-delete` | Delete multiple records by ID. |
+| `DELETE` | `/api/v1/records` | Delete all records, optionally scoped to a source. |
+
+### Nodes
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/nodes` | List all registered edge nodes. |
+| `POST` | `/api/v1/nodes/register` | Register an edge node (HTTP mode). |
+| `GET` | `/api/v1/nodes/{node_id}/stats` | Task run statistics for a node. |
+| `GET` | `/api/v1/nodes/{node_id}/events` | Lifecycle event log for a node. |
+| `DELETE` | `/api/v1/nodes/{node_id}` | Remove a node. |
+| `GET` | `/api/v1/nodes/install/agent.sh` | Download the agent install script. |
+| `WS` | `/api/v1/nodes/ws` | WebSocket reverse channel for NAT-traversing agents. |
+
+### Agents
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/agents` | List AI agents. |
+| `POST` | `/api/v1/agents` | Create an AI agent. |
+| `GET` | `/api/v1/agents/{agent_id}` | Retrieve a single AI agent. |
+| `PATCH` | `/api/v1/agents/{agent_id}` | Update an AI agent. |
+| `DELETE` | `/api/v1/agents/{agent_id}` | Delete an AI agent. |
+
+### Providers
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/providers` | List saved model provider credentials. |
+| `POST` | `/api/v1/providers` | Create a model provider. |
+| `PATCH` | `/api/v1/providers/{provider_id}` | Update a provider. |
+| `DELETE` | `/api/v1/providers/{provider_id}` | Delete a provider. |
+
+### Notifications
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/notifications/rules` | List notification rules. |
+| `POST` | `/api/v1/notifications/rules` | Create a notification rule. |
+| `GET` | `/api/v1/notifications/rules/{rule_id}` | Retrieve a single rule. |
+| `PATCH` | `/api/v1/notifications/rules/{rule_id}` | Update a rule. |
+| `DELETE` | `/api/v1/notifications/rules/{rule_id}` | Delete a rule. |
+| `GET` | `/api/v1/notifications/logs` | List notification delivery logs. |
+
+### Webhooks
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/webhooks/{source_id}` | Inbound webhook that triggers a collection task for a source. |

@@ -1,0 +1,136 @@
+---
+title: "Task Executor Mode: Local Asyncio vs Celery Workers"
+description: "Pick between local asyncio (zero-dependency, single-machine) and Celery with Redis (distributed scale-out). Covers setup, switching, and worker management."
+---
+
+OpenCLI Admin supports two task execution backends, selected with the `TASK_EXECUTOR` environment variable. The default `local` mode runs everything inside the API process — no extra services required. `celery` mode distributes tasks across one or more worker processes backed by Redis, enabling horizontal scaling for high-volume collection workloads.
+
+## Choosing a mode
+
+| | Local | Celery |
+|---|---|---|
+| **Extra services required** | None | Redis |
+| **Scaling** | Single process | Multiple workers across machines |
+| **Recommended for** | Personal use, development, small deployments | Production, high concurrency, multi-server setups |
+| **Worker visibility in dashboard** | No | Yes — Workers page shows live Celery status |
+| **Docker Compose profile** | Default (no profile needed) | `--profile celery` |
+
+## Local mode
+
+`TASK_EXECUTOR=local` is the default. Tasks are dispatched as coroutines inside the FastAPI process using Python's `asyncio` event loop. There is no queue, no broker, and no additional containers to manage.
+
+```bash .env
+TASK_EXECUTOR=local
+```
+
+**When to use local mode:**
+- You are running OpenCLI Admin on a single machine.
+- Your collection volume fits within a single process (dozens to low hundreds of concurrent tasks).
+- You want the simplest possible deployment with no Redis dependency.
+- You are evaluating the product or running it for personal use.
+
+<Note>
+  In local mode, the `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` variables are loaded by the settings class but never evaluated. You can leave them at their defaults.
+</Note>
+
+## Celery mode
+
+`TASK_EXECUTOR=celery` routes collection tasks through Celery. The API process enqueues tasks to Redis; one or more worker processes consume the queue and execute them. A separate Celery Beat process handles scheduled task dispatch.
+
+```bash .env
+TASK_EXECUTOR=celery
+
+# Redis broker — must be reachable by the API, workers, and beat
+CELERY_BROKER_URL=redis://redis:6379/0
+CELERY_RESULT_BACKEND=redis://redis:6379/1
+REDIS_URL=redis://redis:6379/0
+```
+
+### Starting with Docker Compose
+
+The `docker-compose.yml` file includes three services behind the `celery` profile: `redis`, `worker`, and `beat`. Start them alongside the core services:
+
+```bash terminal
+docker compose --profile celery up -d
+```
+
+This starts:
+- `redis` — Redis 7 Alpine, used as both broker and result backend.
+- `worker` — Celery worker with `--concurrency=4`. Add more worker containers to scale horizontally.
+- `beat` — Celery Beat scheduler. Run exactly one Beat instance per deployment.
+
+<Warning>
+  Run only **one** `beat` container at a time. Multiple Beat instances will double-schedule periodic tasks, causing duplicate collection runs.
+</Warning>
+
+### Worker concurrency
+
+The default worker command uses `--concurrency=4`:
+
+```bash docker-compose worker command
+celery -A backend.worker.celery_app worker --loglevel=info --concurrency=4
+```
+
+Each worker process can handle up to 4 concurrent tasks. To increase throughput, either raise `--concurrency` or start additional worker containers. When adding workers, all containers must share the same `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND`.
+
+### Monitoring workers
+
+When `TASK_EXECUTOR=celery`, the **Workers** page in the OpenCLI Admin dashboard shows live Celery worker status — registered workers, active tasks, and queued task counts. This page is hidden in `local` mode because there are no external workers to display.
+
+## Configuration reference
+
+<ParamField path="TASK_EXECUTOR" type="string" default="local">
+  Task execution backend. Accepts `local` (asyncio, in-process) or `celery` (distributed, requires Redis).
+</ParamField>
+
+<ParamField path="REDIS_URL" type="string" default="redis://localhost:6379/0">
+  Redis connection URL. Used for internal pub/sub and as the Celery broker when `TASK_EXECUTOR=celery`. Ignored in `local` mode.
+</ParamField>
+
+<ParamField path="CELERY_BROKER_URL" type="string" default="redis://redis:6379/0">
+  Celery message broker URL. Must be reachable from the API, all workers, and the Beat scheduler. Only evaluated when `TASK_EXECUTOR=celery`.
+</ParamField>
+
+<ParamField path="CELERY_RESULT_BACKEND" type="string" default="redis://redis:6379/1">
+  Where Celery stores task results. Defaults to Redis database 1 to avoid key collisions with the task queue on database 0. Only evaluated when `TASK_EXECUTOR=celery`.
+</ParamField>
+
+## Switching between modes
+
+You can switch modes at any time by changing `TASK_EXECUTOR` in `.env` and restarting the application. No data migration is required — the database schema is the same in both modes. In-flight tasks at the moment of restart will not be automatically retried; trigger them manually after the restart if needed.
+
+<Tabs>
+  <Tab title="Switching to celery">
+    1. Update `.env`:
+
+       ```bash .env
+       TASK_EXECUTOR=celery
+       CELERY_BROKER_URL=redis://redis:6379/0
+       CELERY_RESULT_BACKEND=redis://redis:6379/1
+       REDIS_URL=redis://redis:6379/0
+       ```
+
+    2. Restart with the Celery profile:
+
+       ```bash terminal
+       docker compose down
+       docker compose --profile celery up -d
+       ```
+  </Tab>
+  <Tab title="Switching to local">
+    1. Update `.env`:
+
+       ```bash .env
+       TASK_EXECUTOR=local
+       ```
+
+    2. Restart without the Celery profile:
+
+       ```bash terminal
+       docker compose down
+       docker compose up -d
+       ```
+
+    The `redis`, `worker`, and `beat` containers will not start.
+  </Tab>
+</Tabs>

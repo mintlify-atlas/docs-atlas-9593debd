@@ -1,0 +1,197 @@
+---
+title: "OpenCLI Admin Environment Variables Full Reference"
+description: "All user-configurable environment variables for OpenCLI Admin: security keys, database URL, task executor mode, AI provider keys, SMTP, and agent settings."
+---
+
+OpenCLI Admin is configured entirely through environment variables. Copy `.env.example` to `.env` in the project root and edit the values before starting the application. Settings are loaded at startup by the `Settings` class in `backend/config.py`, which uses [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) with `env_file=".env"`.
+
+## Application
+
+<ParamField path="APP_NAME" type="string" default="opencli-admin">
+  Internal application name. Affects log output and Celery app identifier.
+</ParamField>
+
+<ParamField path="APP_ENV" type="string" default="development">
+  Deployment environment. Accepts `development`, `staging`, or `production`. Enables production-specific guards when set to `production`.
+</ParamField>
+
+<ParamField path="DEBUG" type="boolean" default="false">
+  Enables SQLAlchemy query logging and verbose error responses. Set to `false` in production.
+</ParamField>
+
+<ParamField path="SECRET_KEY" type="string" default="change-me-in-production" required>
+  Secret used to sign sessions and tokens. **Must be changed before going to production.** Use a long, random string (32+ characters).
+</ParamField>
+
+<ParamField path="PUBLIC_URL" type="string" default="">
+  The externally reachable base URL of this deployment (e.g., `http://192.168.1.1:8031` or `https://admin.example.com`). Remote agents use this address to register and receive task dispatches. When left empty the system tries to infer the URL from incoming request headers, which may produce incorrect results behind a reverse proxy with `changeOrigin=true`.
+</ParamField>
+
+<ParamField path="DEFAULT_TIMEZONE" type="string" default="Asia/Shanghai">
+  IANA timezone name applied to scheduled task times displayed in the UI.
+</ParamField>
+
+<Warning>
+  `SECRET_KEY` ships with a placeholder value. Replace it with a randomly generated string before any production deployment. You can generate one with `openssl rand -hex 32`.
+</Warning>
+
+## Ports
+
+These values control which host ports the Docker Compose services bind to. They have no effect when running the application natively with `start.sh`.
+
+| Variable | Default | Service |
+|---|---|---|
+| `API_PORT` | `8031` | Backend FastAPI service |
+| `FRONTEND_PORT` | `8030` | React frontend (nginx) |
+| `NOVNC_PORT` | `3010` | noVNC display for agent-1 |
+| `NOVNC_BASE_PORT` | `3010` | Base port used by the API to calculate per-instance noVNC ports |
+
+## Database
+
+<ParamField path="DATABASE_URL" type="string" default="sqlite+aiosqlite:///./opencli_admin.db">
+  SQLAlchemy async connection string. Defaults to a local SQLite file. See [Database configuration](/configuration/database) for full details on switching to PostgreSQL.
+</ParamField>
+
+## Task executor
+
+<ParamField path="TASK_EXECUTOR" type="string" default="local">
+  Controls how collection tasks are executed. `local` runs tasks in the API process using asyncio (no extra dependencies). `celery` dispatches tasks to Celery workers backed by Redis (required for multi-worker horizontal scaling). See [Task executor](/configuration/task-executor) for a full comparison.
+</ParamField>
+
+<ParamField path="REDIS_URL" type="string" default="redis://localhost:6379/0">
+  Redis connection URL used for internal pub/sub when `TASK_EXECUTOR=celery`. Not required in `local` mode.
+</ParamField>
+
+<ParamField path="CELERY_BROKER_URL" type="string" default="redis://redis:6379/0">
+  Celery message broker URL. Only evaluated when `TASK_EXECUTOR=celery`.
+</ParamField>
+
+<ParamField path="CELERY_RESULT_BACKEND" type="string" default="redis://redis:6379/1">
+  Celery result backend URL. Uses Redis database 1 by default to separate results from the task queue. Only evaluated when `TASK_EXECUTOR=celery`.
+</ParamField>
+
+## Collection mode
+
+<ParamField path="COLLECTION_MODE" type="string" default="local">
+  Determines where collection tasks are executed:
+  - `local` — the API process dispatches directly to Chrome/CDP endpoints in the same Docker network.
+  - `agent` — tasks are routed to registered remote agent nodes via HTTP or WebSocket.
+</ParamField>
+
+## Agent (edge node)
+
+These variables are set on the **agent machine**, not the central server, unless you are running the bundled `agent-1` sidecar.
+
+| Variable | Description | Default |
+|---|---|---|
+| `CENTRAL_API_URL` | URL the agent uses to register with the center (e.g., `http://192.168.1.1:8031`) | — |
+| `AGENT_ADVERTISE_URL` | Public URL the center uses to call back into this agent over HTTP | Auto-detected |
+| `AGENT_PORT` | HTTP port the agent server listens on | `19823` |
+| `AGENT_MODE` | Chrome connection mode: `cdp` (direct DevTools Protocol) or `bridge` (Browser Bridge extension) | `bridge` |
+| `AGENT_LABEL` | Human-readable label shown in the Nodes dashboard | Hostname |
+| `AGENT_REGISTER` | Registration channel: `http` (LAN, center calls agent) \| `ws` (NAT/WAN, agent opens reverse WebSocket) \| `off` | `http` |
+| `INSTALL_CHROME` | Set `true` to use the `-chrome` agent image variant (~450 MB) that bundles Chromium. Default image (~100 MB) connects to host Chrome. | `false` |
+
+## AI providers
+
+These keys are passed to the AI processing pipeline that runs after each collection. Leave unused providers empty.
+
+| Variable | Provider |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic Claude (claude-3-5-sonnet, etc.) |
+| `OPENAI_API_KEY` | OpenAI (GPT-4o, etc.) |
+
+<Tip>
+  DeepSeek, Kimi, GLM, MiniMax, and Ollama providers are also supported. Their API keys are configured directly in the AI Agent settings inside the dashboard, not via `.env`.
+</Tip>
+
+## API security
+
+<ParamField path="API_KEY_ENABLED" type="boolean" default="false">
+  When `true`, all API requests must include an `X-API-Key` header matching `API_KEY`.
+</ParamField>
+
+<ParamField path="API_KEY" type="string" default="">
+  The API key value enforced when `API_KEY_ENABLED=true`. Leave empty to disable key authentication.
+</ParamField>
+
+## Notifications
+
+Email (SMTP) settings are used by the notification pipeline to send alerts on new records, AI completions, and task failures.
+
+| Variable | Description | Default |
+|---|---|---|
+| `SMTP_HOST` | SMTP server hostname | — |
+| `SMTP_PORT` | SMTP server port | `587` |
+| `SMTP_USER` | SMTP authentication username | — |
+| `SMTP_PASSWORD` | SMTP authentication password | — |
+| `SMTP_FROM` | Sender address shown in outgoing emails | — |
+
+<ParamField path="WEBHOOK_SECRET" type="string" default="change-me-webhook-secret">
+  HMAC secret used to sign outgoing webhook payloads. Change this to a unique value so consumers can verify that payloads originate from your OpenCLI Admin instance.
+</ParamField>
+
+<Warning>
+  `WEBHOOK_SECRET` ships with a placeholder. Replace it before configuring any webhook consumers in production.
+</Warning>
+
+## Timeouts
+
+All timeout values are in **seconds**.
+
+<ParamField path="OPENCLI_TIMEOUT" type="number" default="120">
+  Maximum execution time for an `opencli` subprocess. Applies in both `local` mode (API process) and on the agent side. Tasks that exceed this limit are terminated and marked as failed.
+</ParamField>
+
+<ParamField path="AGENT_HTTP_TIMEOUT" type="number" default="130">
+  Timeout for the center's HTTP dispatch request to a LAN agent. Should be set slightly higher than `OPENCLI_TIMEOUT` so the agent has time to complete before the request times out.
+</ParamField>
+
+<ParamField path="AGENT_WS_TIMEOUT" type="number" default="130">
+  Timeout when the center dispatches a task over a reverse WebSocket channel (used in `ws` registration mode). Should also exceed `OPENCLI_TIMEOUT`.
+</ParamField>
+
+## Chrome / CDP
+
+<ParamField path="OPENCLI_CDP_ENDPOINT" type="string" default="http://chrome-1:19222">
+  The Chrome DevTools Protocol endpoint for the default single-agent instance. Used when `AGENT_POOL_ENDPOINTS` is empty.
+</ParamField>
+
+<ParamField path="AGENT_POOL_ENDPOINTS" type="string" default="">
+  Comma-separated list of Chrome/agent endpoint URLs for multi-instance pools. When set, this overrides `OPENCLI_CDP_ENDPOINT`. Example: `http://chrome-1:19222,http://chrome-2:19222,http://chrome-3:19222`. Manage the pool with `./scripts/chrome-pool.sh`.
+</ParamField>
+
+## Minimal production `.env`
+
+The following example contains the minimum set of variables you should review before a production deployment. All other variables can retain their defaults.
+
+```bash .env
+# Security — must change
+SECRET_KEY=your-long-random-secret-key-here
+WEBHOOK_SECRET=your-webhook-signing-secret
+
+# Public address (required for remote agent registration)
+PUBLIC_URL=https://admin.example.com
+
+# Database (switch to PostgreSQL for production)
+DATABASE_URL=postgresql+asyncpg://opencli:strongpassword@localhost:5432/opencli_admin
+
+# Collection and task mode
+COLLECTION_MODE=local
+TASK_EXECUTOR=local
+
+# AI providers (add keys for providers you use)
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+
+# Email notifications (optional)
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=notifications@example.com
+SMTP_PASSWORD=your-smtp-password
+SMTP_FROM=notifications@example.com
+
+# Ports
+API_PORT=8031
+FRONTEND_PORT=8030
+```

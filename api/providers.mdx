@@ -1,0 +1,135 @@
+---
+title: "Providers API: Save and Reuse AI Model Credentials"
+description: "Create reusable model provider credentials (API key, base URL, model) and reference them from AI agents instead of storing secrets inline in each agent."
+---
+
+Model providers let you save AI backend credentials once and reference them from multiple AI agents via `provider_id`. Instead of repeating an API key inside every agent's `processor_config`, you create a provider record with the credentials and point agents to it. This is especially useful when you have several agents sharing the same API key or when you want to rotate credentials in one place.
+
+## Provider fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique provider ID (UUID) |
+| `name` | string | Human-readable label (up to 255 chars) |
+| `provider_type` | string | Backend type: `claude`, `openai`, or `local` |
+| `base_url` | string | Optional API endpoint override (for OpenAI-compatible providers like DeepSeek, Kimi, GLM) |
+| `api_key` | string | API key credential |
+| `default_model` | string | Default model name used when the agent does not specify a model |
+| `notes` | string | Optional free-text notes |
+| `enabled` | boolean | Whether this provider is available for agent use |
+| `created_at` | string | ISO 8601 UTC timestamp |
+| `updated_at` | string | ISO 8601 UTC timestamp |
+
+---
+
+## List providers
+
+`GET /api/v1/providers`
+
+Returns all saved model providers, ordered by creation time descending.
+
+### Response
+
+<ResponseField name="data" type="ModelProviderRead[]">
+  Array of provider objects. All fields described in the table above.
+</ResponseField>
+
+```bash
+curl http://localhost:8031/api/v1/providers
+```
+
+---
+
+## Create provider
+
+`POST /api/v1/providers`
+
+Creates a new model provider record. Returns `201 Created` on success.
+
+### Request body
+
+<ParamField body="name" type="string" required>
+  Display name. 1–255 characters.
+</ParamField>
+
+<ParamField body="provider_type" type="string" default="openai">
+  Backend type. One of `claude`, `openai`, or `local`.
+</ParamField>
+
+<ParamField body="api_key" type="string">
+  API key credential. Stored as plain text — use a dedicated secrets store for high-security deployments.
+</ParamField>
+
+<ParamField body="base_url" type="string">
+  Optional endpoint override. Required for OpenAI-compatible providers that are not hosted at `api.openai.com` (e.g., `https://api.deepseek.com/v1` for DeepSeek).
+</ParamField>
+
+<ParamField body="default_model" type="string">
+  Default model name applied when an agent referencing this provider has no model set.
+</ParamField>
+
+<ParamField body="notes" type="string">
+  Optional free-text notes about this provider.
+</ParamField>
+
+<ParamField body="enabled" type="boolean" default="true">
+  Whether the provider is available. Disabled providers cannot be selected by agents.
+</ParamField>
+
+```bash
+curl -X POST http://localhost:8031/api/v1/providers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "DeepSeek API",
+    "provider_type": "openai",
+    "api_key": "sk-...",
+    "base_url": "https://api.deepseek.com/v1",
+    "default_model": "deepseek-chat"
+  }'
+```
+
+---
+
+## Update provider
+
+`PATCH /api/v1/providers/{provider_id}`
+
+Partially updates a provider. Only fields included in the request body are changed.
+
+### Path parameters
+
+<ParamField path="provider_id" type="string" required>
+  Provider UUID.
+</ParamField>
+
+### Request body
+
+All fields from the create request are accepted as optional updates.
+
+```bash
+curl -X PATCH http://localhost:8031/api/v1/providers/prov_abc123 \
+  -H "Content-Type: application/json" \
+  -d '{ "api_key": "sk-new-key", "enabled": true }'
+```
+
+---
+
+## Delete provider
+
+`DELETE /api/v1/providers/{provider_id}`
+
+Permanently deletes the provider record. AI agents that referenced this provider via `provider_id` will retain the reference but fall back to their inline `processor_config` for credentials.
+
+### Path parameters
+
+<ParamField path="provider_id" type="string" required>
+  Provider UUID.
+</ParamField>
+
+```bash
+curl -X DELETE http://localhost:8031/api/v1/providers/prov_abc123
+```
+
+<Note>
+  Deleting a provider does not automatically update agents that reference it. Those agents will continue to work if they have inline credentials in `processor_config`, but will fail if they rely solely on the deleted provider's credentials.
+</Note>

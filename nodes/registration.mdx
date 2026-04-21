@@ -1,0 +1,131 @@
+---
+title: "Registering Edge Nodes with the OpenCLI Admin Center"
+description: "Step-by-step guide to installing opencli-agent on remote machines using Docker or Python, covering WS reverse-tunnel and HTTP direct registration modes."
+---
+
+Every remote machine that participates in distributed collection must run `opencli-agent` and register with the central OpenCLI Admin server. The agent is a lightweight FastAPI process that accepts collect tasks, runs the local opencli binary against the node's Chrome instance, and returns results. Registration can happen over a persistent WebSocket reverse tunnel (for nodes behind NAT) or over a direct HTTP call (for LAN-reachable nodes).
+
+## Registration modes
+
+<CardGroup cols={2}>
+  <Card title="WS reverse tunnel" icon="arrow-left-right">
+    The agent initiates a persistent WebSocket connection to the center at `/api/v1/nodes/ws`. The center pushes collect tasks down that long-lived connection; the agent streams results back in-band. No inbound port needs to be open on the agent machine.
+  </Card>
+  <Card title="HTTP direct" icon="globe">
+    The agent starts an HTTP server, then POSTs its own URL to the center's `/api/v1/nodes/register` endpoint. The center calls the agent directly for each task. Requires the agent to be reachable from the center (same LAN or open inbound port).
+  </Card>
+</CardGroup>
+
+<Tip>
+Use WS mode whenever the agent is behind NAT or a firewall—it is the default and works in almost every network topology. Switch to HTTP mode only when you are on a flat LAN and want to avoid the WebSocket dependency.
+</Tip>
+
+## Getting the install command from the UI
+
+The center generates a pre-filled install command with `CENTRAL_API_URL` already substituted. This is the recommended way to install agents.
+
+<Steps>
+  <Step title="Open Node Management">
+    In the OpenCLI Admin sidebar, navigate to **Node Management**.
+  </Step>
+  <Step title="Click Add Node">
+    Click the **Add Node** button to open the Install Wizard.
+  </Step>
+  <Step title="Choose install options">
+    Select your registration mode (WS or HTTP), Chrome connection mode (Bridge or CDP), and install method (Docker or Python). The wizard generates the full command.
+  </Step>
+  <Step title="Run the command on the target machine">
+    Copy the generated command and run it on the remote machine. The node appears in the list as soon as registration completes.
+  </Step>
+</Steps>
+
+## Installation methods
+
+<Tabs>
+  <Tab title="Docker — WS mode">
+    Run this command on the remote machine. Replace `<center-ip>` with the public or LAN IP of your OpenCLI Admin server.
+
+    ```bash
+    docker run -d --name opencli-agent --restart unless-stopped \
+      --add-host=host.docker.internal:host-gateway \
+      -e CENTRAL_API_URL=http://<center-ip>:8030 \
+      -e AGENT_REGISTER=ws \
+      -e AGENT_MODE=bridge \
+      -p 19823:19823 \
+      xjh1994/opencli-admin-agent:0.3.6
+    ```
+
+    `--add-host=host.docker.internal:host-gateway` is required on Linux so the container can reach the host Chrome instance. It is a no-op on Docker Desktop.
+  </Tab>
+  <Tab title="Docker — HTTP mode">
+    Use HTTP mode when the center can reach the agent's IP directly (same LAN):
+
+    ```bash
+    docker run -d --name opencli-agent --restart unless-stopped \
+      --add-host=host.docker.internal:host-gateway \
+      -e CENTRAL_API_URL=http://<center-ip>:8030 \
+      -e AGENT_REGISTER=http \
+      -e AGENT_MODE=bridge \
+      -p 19823:19823 \
+      xjh1994/opencli-admin-agent:0.3.6
+    ```
+
+    The agent will POST its auto-detected IP and port to the center on startup.
+  </Tab>
+  <Tab title="One-click script — Docker">
+    The center serves an install script with `CENTRAL_API_URL` pre-filled. Run it on the target machine:
+
+    ```bash
+    curl -fsSL http://<center>:8030/api/v1/nodes/install/agent.sh | bash
+    ```
+
+    To embed Chromium inside the container (no host Chrome required):
+
+    ```bash
+    curl -fsSL http://<center>:8030/api/v1/nodes/install/agent.sh | bash -s -- docker --install-chrome
+    ```
+
+    The script auto-detects a free port starting from `19823`, removes any existing `opencli-agent` container, and starts the new one with `--restart unless-stopped`.
+  </Tab>
+  <Tab title="One-click script — Python">
+    For machines without Docker, the script can install the agent as a native Python process:
+
+    ```bash
+    curl -fsSL http://<center>:8030/api/v1/nodes/install/agent.sh | \
+      AGENT_REGISTER=ws AGENT_MODE=bridge bash -s -- python
+    ```
+
+    The script downloads `agent_server.py` from the center, creates a virtualenv at `~/.opencli-agent/venv`, installs `fastapi`, `uvicorn`, `httpx`, `pyyaml`, and `websockets`, then launches the server. On systemd hosts it installs a service unit so the agent survives reboots.
+  </Tab>
+</Tabs>
+
+## Environment variables
+
+These variables control agent behavior. Set them as Docker `-e` flags or export them before running the Python install.
+
+| Variable | Description | Default |
+|---|---|---|
+| `CENTRAL_API_URL` | Center API base URL — required for registration | — |
+| `AGENT_REGISTER` | Registration mode: `ws` \| `http` \| `off` | `ws` |
+| `AGENT_MODE` | Chrome connection mode: `bridge` \| `cdp` | `cdp` |
+| `AGENT_PORT` | Port the agent HTTP server listens on | `19823` |
+| `AGENT_LABEL` | Human-readable label shown in the node list | hostname |
+| `AGENT_ADVERTISE_URL` | Canonical URL the center uses to identify this agent; auto-detected from outbound IP if unset | auto |
+| `OPENCLI_CDP_ENDPOINT` | Chrome CDP endpoint the agent passes to opencli | `http://localhost:19222` |
+| `OPENCLI_TIMEOUT` | Subprocess timeout in seconds for each collect call | `120` |
+| `HTTP_PROXY` / `HTTPS_PROXY` | Proxy for agent-to-center traffic | — |
+
+<Warning>
+`CENTRAL_API_URL` must be reachable from the agent machine. If your center runs on `localhost` during development, the install script automatically rewrites it to `host.docker.internal` for Docker agents so the container can reach the host.
+</Warning>
+
+## What happens after registration
+
+- **WS mode**: the agent opens a WebSocket to `ws(s)://<center>/api/v1/nodes/ws`, sends a `register` handshake, and enters a receive loop. The center records an `online` event and marks the node as connected. If the connection drops, the agent reconnects with exponential back-off (up to 60 seconds between attempts).
+- **HTTP mode**: the agent POSTs `{ agent_url, mode, node_type, label }` to `<center>/api/v1/nodes/register`. The center upserts the node record, adds it to the in-memory browser pool, and records a `registered` event.
+
+In both cases the node appears in **Node Management** within seconds, showing its label, protocol, mode, and last-seen timestamp. The event log under each node records every `registered`, `online`, and `offline` transition.
+
+<Note>
+Registration is idempotent. Running the install command again on an already-registered node updates its mode and label without creating a duplicate entry.
+</Note>

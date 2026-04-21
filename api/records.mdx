@@ -1,0 +1,171 @@
+---
+title: "Records API: Search and Manage Collected Data Records"
+description: "List, search, retrieve, and delete collected records. Supports full-text search, single and batch deletion, and source-scoped bulk clearing of all records."
+---
+
+Collected records are the output of every collection task. Each record stores the raw channel response, a normalized version with standard fields (`title`, `url`, `content`, `author`, `published_at`), an optional AI enrichment payload, a SHA-256 content hash for deduplication, and a processing status that tracks the record through the pipeline.
+
+## Record status values
+
+| Status | Meaning |
+|--------|---------|
+| `raw` | Collected but not yet normalized. |
+| `normalized` | Normalized standard fields are populated. |
+| `ai_processed` | AI enrichment has been applied. |
+| `notified` | Notification has been sent for this record. |
+| `error` | Processing encountered an error. |
+
+---
+
+## List records
+
+`GET /api/v1/records`
+
+Returns a paginated list of collected records. Supports full-text search across `normalized_data` and `raw_data`.
+
+### Query parameters
+
+<ParamField query="source_id" type="string">
+  Filter records belonging to a specific source.
+</ParamField>
+
+<ParamField query="task_id" type="string">
+  Filter records produced by a specific task.
+</ParamField>
+
+<ParamField query="status" type="string">
+  Filter by processing status. One of `raw`, `normalized`, `ai_processed`, `notified`, `error`.
+</ParamField>
+
+<ParamField query="search" type="string">
+  Full-text search query applied across `normalized_data` and `raw_data` fields.
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number. Must be ≥ 1.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="20">
+  Items per page. Accepts 1–100.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="CollectedRecordRead[]">
+  Array of record objects.
+  <Expandable title="CollectedRecordRead properties">
+    <ResponseField name="id" type="string">Unique record ID (UUID).</ResponseField>
+    <ResponseField name="task_id" type="string">ID of the task that produced this record.</ResponseField>
+    <ResponseField name="source_id" type="string">ID of the source the record belongs to.</ResponseField>
+    <ResponseField name="raw_data" type="object">Raw data as returned by the channel plugin, before normalization.</ResponseField>
+    <ResponseField name="normalized_data" type="object">Normalized fields: `title`, `url`, `content`, `author`, `published_at`, and any extra fields.</ResponseField>
+    <ResponseField name="ai_enrichment" type="object">AI-generated fields such as `summary`, `tags`, and `sentiment`. `null` if not processed.</ResponseField>
+    <ResponseField name="content_hash" type="string">SHA-256 hash of normalized content used for deduplication.</ResponseField>
+    <ResponseField name="status" type="string">Current processing status.</ResponseField>
+    <ResponseField name="error_message" type="string">Error description if status is `error`. `null` otherwise.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+    <ResponseField name="updated_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl "http://localhost:8031/api/v1/records?source_id=src_abc123&search=hacker+news&page=1&limit=20"
+```
+
+---
+
+## Get record
+
+`GET /api/v1/records/{record_id}`
+
+Retrieves a single record by ID with the full `raw_data`, `normalized_data`, and `ai_enrichment` payloads.
+
+### Path parameters
+
+<ParamField path="record_id" type="string" required>
+  Record UUID.
+</ParamField>
+
+```bash
+curl http://localhost:8031/api/v1/records/rec_jkl012
+```
+
+---
+
+## Delete record
+
+`DELETE /api/v1/records/{record_id}`
+
+Permanently deletes a single record. Returns `404` if the record does not exist.
+
+### Path parameters
+
+<ParamField path="record_id" type="string" required>
+  Record UUID.
+</ParamField>
+
+```bash
+curl -X DELETE http://localhost:8031/api/v1/records/rec_jkl012
+```
+
+---
+
+## Batch delete records
+
+`POST /api/v1/records/batch-delete`
+
+Deletes multiple records in a single request. If `ids` is empty, returns `{"deleted": 0}` without error.
+
+### Request body
+
+<ParamField body="ids" type="string[]" required>
+  Array of record UUIDs to delete.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="object">
+  <Expandable title="properties">
+    <ResponseField name="deleted" type="integer">
+      Number of records actually deleted.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST http://localhost:8031/api/v1/records/batch-delete \
+  -H "Content-Type: application/json" \
+  -d '{ "ids": ["rec_jkl012", "rec_mno345", "rec_pqr678"] }'
+```
+
+---
+
+## Clear all records
+
+`DELETE /api/v1/records`
+
+Deletes all records, optionally scoped to a single source. Use with caution — this operation is not reversible.
+
+### Query parameters
+
+<ParamField query="source_id" type="string">
+  When provided, only records belonging to this source are deleted. Omit to delete all records across all sources.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="object">
+  <Expandable title="properties">
+    <ResponseField name="deleted" type="integer">
+      Total number of records deleted.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+# Delete all records for a specific source
+curl -X DELETE "http://localhost:8031/api/v1/records?source_id=src_abc123"
+
+# Delete ALL records (no filter)
+curl -X DELETE http://localhost:8031/api/v1/records
+```

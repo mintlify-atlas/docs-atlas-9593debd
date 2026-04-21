@@ -1,0 +1,179 @@
+---
+title: "Full Docker Compose Deployment Guide for OpenCLI Admin"
+description: "Standard vs chrome-embedded agent images, SECRET_KEY setup, noVNC platform login, multi-agent scaling, and optional PostgreSQL and Celery profiles."
+---
+
+Docker Compose is the recommended way to run OpenCLI Admin in production or as a long-running service. Pre-built multi-arch images (amd64 + arm64) are published to Docker Hub, so no local build is required. A single `docker compose up -d` starts the frontend, API, and a built-in agent container, all wired together on an internal network.
+
+## Prerequisites
+
+- Docker Engine 24+
+- Docker Compose v2 (`docker compose` not `docker-compose`)
+- For the standard agent image: Chrome installed on the host machine
+
+## Agent image variants
+
+The agent container runs the opencli engine and a noVNC server so you can manage browser logins from the web. Two variants are available:
+
+| Variant | Image tag | Size | Chrome source |
+|---------|-----------|------|---------------|
+| Standard | `xjh1994/opencli-admin-agent:0.3.6` | ~100 MB | Host machine via `host.docker.internal` |
+| Chrome-embedded | `xjh1994/opencli-admin-agent:0.3.6-chrome` | ~450 MB | Bundled Chromium, fully self-contained |
+
+<Tip>
+  Use the chrome-embedded variant on cloud servers where installing Chrome on the host is impractical. Set `CHROME_SUFFIX=-chrome` in your `.env` to switch the Compose file to that image automatically.
+</Tip>
+
+## Deployment steps
+
+<Steps>
+  <Step title="Copy the environment file">
+    ```bash
+    cp .env.example .env
+    ```
+  </Step>
+
+  <Step title="Edit SECRET_KEY and other settings">
+    Open `.env` in an editor. At minimum, change `SECRET_KEY`:
+
+    ```bash
+    SECRET_KEY=change-me-in-production-use-long-random-string
+    ```
+
+    <Warning>
+      Never run with the default `SECRET_KEY` value. It is public and provides no security.
+    </Warning>
+
+    Other commonly adjusted values:
+
+    ```bash
+    PUBLIC_URL=http://192.168.1.1:8031   # Required if remote agents need to register
+    COLLECTION_MODE=local                 # local | agent
+    FRONTEND_PORT=8030                    # Dashboard port
+    API_PORT=8031                         # API port
+    NOVNC_PORT=3010                       # noVNC port for agent-1
+    ```
+  </Step>
+
+  <Step title="Start host Chrome (standard image only)">
+    If you are using the standard agent image, Chrome must be running on the host with CDP enabled before Compose starts:
+
+    <CodeGroup>
+
+    ```bash macOS
+    /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+        --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0 \
+        --no-first-run --no-default-browser-check &
+    ```
+
+    ```bash Linux
+    google-chrome \
+        --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0 \
+        --no-first-run --no-default-browser-check &
+    ```
+
+    </CodeGroup>
+
+    Skip this step if you are using `CHROME_SUFFIX=-chrome`.
+  </Step>
+
+  <Step title="Start all services">
+    ```bash
+    docker compose up -d
+    ```
+
+    Docker pulls images on first run. Subsequent starts are instant.
+  </Step>
+</Steps>
+
+## Service URLs
+
+| Service | Default URL | Description |
+|---------|-------------|-------------|
+| Dashboard | http://localhost:8030 | React frontend |
+| API docs | http://localhost:8031/docs | FastAPI interactive docs (Swagger UI) |
+| Agent 1 noVNC | http://localhost:3010 | Browser remote desktop for agent-1 |
+| Agent 2 noVNC | http://localhost:3011 | Browser remote desktop for agent-2 |
+| Agent 3 noVNC | http://localhost:3012 | Browser remote desktop for agent-3 |
+
+Port numbers for additional agents follow the pattern `NOVNC_BASE_PORT + (n - 1)`.
+
+## Logging in to platform accounts
+
+The opencli channel relies on browser login state. Use noVNC to log in from within the agent's Chromium session:
+
+1. Open http://localhost:3010 for agent-1 (http://localhost:3011 for agent-2, etc.)
+2. Navigate to the platform (e.g., `https://www.bilibili.com`) and log in normally
+3. Close the noVNC tab — the login state is saved to the agent's Docker volume (`agent_profile_1`)
+
+<Note>
+  You only need to log in once per agent. Login state persists through container restarts because it is stored in a named Docker volume, not inside the container filesystem.
+</Note>
+
+Platforms that require login: Xiaohongshu, Bilibili, Zhihu, Weibo, Twitter/X, LinkedIn, YouTube.
+Public sources (Hacker News, BBC, Reuters, RSS feeds) work without any login.
+
+## Multi-agent setup
+
+Each agent instance has its own isolated Chrome profile, allowing you to log into the same platform with different accounts in parallel. Additional agent instances beyond `agent-1` are managed dynamically from the dashboard:
+
+1. Go to **Nodes** in the dashboard
+2. Click **Add node**
+3. Follow the install wizard to start a new agent container
+
+The API manages agent container lifecycle via the mounted Docker socket (`/var/run/docker.sock`).
+
+For a manual multi-agent deployment, you can also run separate `docker run` commands:
+
+```bash
+# WebSocket reverse channel — works across NAT
+docker run -d --name opencli-agent-2 --restart unless-stopped \
+  --add-host=host.docker.internal:host-gateway \
+  -e CENTRAL_API_URL=http://<center-ip>:8030 \
+  -e AGENT_REGISTER=ws -e AGENT_MODE=bridge \
+  -p 19824:19823 \
+  xjh1994/opencli-admin-agent:0.3.6
+
+# HTTP direct — for LAN where the center can reach the agent
+docker run -d --name opencli-agent-3 --restart unless-stopped \
+  --add-host=host.docker.internal:host-gateway \
+  -e CENTRAL_API_URL=http://<center-ip>:8030 \
+  -e AGENT_REGISTER=http -e AGENT_MODE=bridge \
+  -p 19825:19823 \
+  xjh1994/opencli-admin-agent:0.3.6
+```
+
+## Building from source
+
+If you want to build the images locally instead of pulling from Docker Hub:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
+```
+
+## Optional: PostgreSQL and Celery
+
+The default configuration uses SQLite and asyncio-based task execution, which is sufficient for single-node deployments. For production at scale you can enable PostgreSQL and Celery with profiles:
+
+```bash
+# PostgreSQL only
+docker compose --profile postgres up -d
+
+# Celery (distributed task queue) — also requires Redis
+docker compose --profile celery up -d
+
+# Both
+docker compose --profile postgres --profile celery up -d
+```
+
+## Stopping
+
+```bash
+docker compose down
+```
+
+Add `-v` to also remove the named volumes (database, agent Chrome profiles):
+
+```bash
+docker compose down -v   # Destructive — deletes all data and login sessions
+```

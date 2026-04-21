@@ -1,0 +1,199 @@
+---
+title: "Agents API: Configure and Manage AI Processing Agents"
+description: "Create and manage AI agent configurations for post-collection processing. Supports Claude, OpenAI, DeepSeek, Kimi, GLM, MiniMax, and Ollama providers."
+---
+
+AI agents define how collected records are processed after ingestion. Each agent specifies a processor type (the AI provider), an optional model override, a prompt template, and provider credentials either inline via `processor_config` or by referencing a saved model provider. Once an agent is associated with a source or schedule, it is automatically invoked after each collection run.
+
+## Supported processor types
+
+The `processor_type` field maps to the underlying AI backend. Supported values are:
+
+- `claude` — Anthropic Claude (uses the Anthropic SDK)
+- `openai` — OpenAI-compatible APIs. Used for OpenAI, DeepSeek, Kimi, GLM, MiniMax, and any other provider with an OpenAI-compatible endpoint — set `base_url` in `processor_config` accordingly
+- `local` — Locally hosted models via Ollama or vLLM. Supports both Ollama's `/api/generate` and OpenAI-compatible `/v1/chat/completions` styles
+
+---
+
+## List agents
+
+`GET /api/v1/agents`
+
+Returns all AI agents, ordered by creation time descending.
+
+### Query parameters
+
+<ParamField query="enabled" type="boolean">
+  Filter by enabled state. Omit to return both enabled and disabled agents.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="AIAgentRead[]">
+  Array of agent objects.
+  <Expandable title="AIAgentRead properties">
+    <ResponseField name="id" type="string">Unique agent ID (UUID).</ResponseField>
+    <ResponseField name="name" type="string">Display name.</ResponseField>
+    <ResponseField name="description" type="string">Optional description of the agent's purpose.</ResponseField>
+    <ResponseField name="processor_type" type="string">AI backend: `claude`, `openai`, or `local`.</ResponseField>
+    <ResponseField name="model" type="string">Optional model name override (e.g., `claude-3-5-sonnet-20241022`, `gpt-4o`). Uses provider default when `null`.</ResponseField>
+    <ResponseField name="prompt_template" type="string">Prompt sent to the model with the collected record content injected.</ResponseField>
+    <ResponseField name="processor_config" type="object">Provider-specific configuration such as `api_key`, `base_url`, or `temperature`.</ResponseField>
+    <ResponseField name="enabled" type="boolean">Whether the agent is active.</ResponseField>
+    <ResponseField name="provider_id" type="string">Optional ID of a saved ModelProvider record supplying credentials.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+    <ResponseField name="updated_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl "http://localhost:8031/api/v1/agents?enabled=true"
+```
+
+---
+
+## Create agent
+
+`POST /api/v1/agents`
+
+Creates a new AI agent configuration. Returns `201 Created` on success.
+
+### Request body
+
+<ParamField body="name" type="string" required>
+  Display name. 1–255 characters.
+</ParamField>
+
+<ParamField body="processor_type" type="string" default="claude">
+  AI backend to use. One of `claude`, `openai`, or `local`.
+</ParamField>
+
+<ParamField body="prompt_template" type="string" default="">
+  Prompt template sent to the model. The collected record content is injected at runtime.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Optional human-readable description of the agent's purpose.
+</ParamField>
+
+<ParamField body="model" type="string">
+  Optional model name override. When omitted, the provider's default model is used.
+</ParamField>
+
+<ParamField body="processor_config" type="object">
+  Provider-specific configuration. Commonly includes `api_key` and `base_url` for OpenAI-compatible providers. Defaults to `{}`.
+</ParamField>
+
+<ParamField body="enabled" type="boolean" default="true">
+  Whether the agent starts enabled.
+</ParamField>
+
+<ParamField body="provider_id" type="string">
+  Optional ID of a saved ModelProvider to use for credentials instead of inline `processor_config`.
+</ParamField>
+
+```bash
+curl -X POST http://localhost:8031/api/v1/agents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "DeepSeek Summarizer",
+    "processor_type": "openai",
+    "model": "deepseek-chat",
+    "prompt_template": "Summarize the following article in 3 bullet points:\n\n{content}",
+    "processor_config": {
+      "api_key": "sk-...",
+      "base_url": "https://api.deepseek.com/v1"
+    },
+    "enabled": true
+  }'
+```
+
+---
+
+## Get agent
+
+`GET /api/v1/agents/{agent_id}`
+
+Retrieves a single AI agent by ID.
+
+### Path parameters
+
+<ParamField path="agent_id" type="string" required>
+  Agent UUID.
+</ParamField>
+
+```bash
+curl http://localhost:8031/api/v1/agents/agent_vwx234
+```
+
+---
+
+## Update agent
+
+`PATCH /api/v1/agents/{agent_id}`
+
+Partially updates an AI agent. Only fields included in the request body are changed.
+
+### Path parameters
+
+<ParamField path="agent_id" type="string" required>
+  Agent UUID.
+</ParamField>
+
+### Request body
+
+<ParamField body="name" type="string">
+  Updated display name.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Updated description.
+</ParamField>
+
+<ParamField body="processor_type" type="string">
+  Updated AI backend.
+</ParamField>
+
+<ParamField body="model" type="string">
+  Updated model name.
+</ParamField>
+
+<ParamField body="prompt_template" type="string">
+  Updated prompt template.
+</ParamField>
+
+<ParamField body="processor_config" type="object">
+  Replacement provider configuration object.
+</ParamField>
+
+<ParamField body="enabled" type="boolean">
+  Enable or disable the agent.
+</ParamField>
+
+<ParamField body="provider_id" type="string">
+  Update or clear the bound provider ID.
+</ParamField>
+
+```bash
+curl -X PATCH http://localhost:8031/api/v1/agents/agent_vwx234 \
+  -H "Content-Type: application/json" \
+  -d '{ "enabled": false }'
+```
+
+---
+
+## Delete agent
+
+`DELETE /api/v1/agents/{agent_id}`
+
+Permanently deletes an AI agent. Tasks that reference this agent via `agent_id` will have their foreign key set to `null` (SET NULL on delete).
+
+### Path parameters
+
+<ParamField path="agent_id" type="string" required>
+  Agent UUID.
+</ParamField>
+
+```bash
+curl -X DELETE http://localhost:8031/api/v1/agents/agent_vwx234
+```

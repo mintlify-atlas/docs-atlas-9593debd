@@ -1,0 +1,239 @@
+---
+title: "Notifications API: Rules, Channels, and Delivery Logs"
+description: "Configure notification rules that fire on new records, AI completion, or task failure. Supports webhook, Feishu, DingTalk, WeCom, and email channels."
+---
+
+The notifications system lets you push alerts to external channels whenever a defined event occurs. A notification rule binds a trigger event to a notifier type and its configuration. Rules can optionally be scoped to a single source so that only activity from that source triggers notifications. Delivery attempts are recorded in notification logs.
+
+## Trigger events
+
+| Value | When it fires |
+|-------|---------------|
+| `on_new_record` | A new record is stored after collection. |
+| `on_ai_processed` | A record's AI enrichment step completes. |
+| `on_task_failed` | A collection task reaches the `failed` status. |
+
+## Notifier types
+
+| Value | Description |
+|-------|-------------|
+| `webhook` | HTTP POST to a custom URL. |
+| `feishu` | Feishu (Lark) incoming webhook. |
+| `dingtalk` | DingTalk custom robot webhook. |
+| `wecom` | WeCom (Enterprise WeChat) group robot. |
+| `email` | SMTP email delivery. Requires SMTP settings in `.env`. |
+
+---
+
+## List notification rules
+
+`GET /api/v1/notifications/rules`
+
+Returns a paginated list of notification rules.
+
+### Query parameters
+
+<ParamField query="page" type="integer" default="1">
+  Page number. Must be ≥ 1.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="20">
+  Items per page. Accepts 1–100.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="NotificationRuleRead[]">
+  Array of rule objects.
+  <Expandable title="NotificationRuleRead properties">
+    <ResponseField name="id" type="string">Unique rule ID (UUID).</ResponseField>
+    <ResponseField name="name" type="string">Display name.</ResponseField>
+    <ResponseField name="source_id" type="string">Optional source scope. `null` means all sources trigger this rule.</ResponseField>
+    <ResponseField name="trigger_event" type="string">Trigger event: `on_new_record`, `on_ai_processed`, or `on_task_failed`.</ResponseField>
+    <ResponseField name="notifier_type" type="string">Delivery channel: `webhook`, `feishu`, `dingtalk`, `wecom`, or `email`.</ResponseField>
+    <ResponseField name="notifier_config" type="object">Channel-specific configuration (e.g., webhook URL, email recipients).</ResponseField>
+    <ResponseField name="filter_conditions" type="object">Optional JSON logic filter applied before sending. `null` means no filter.</ResponseField>
+    <ResponseField name="enabled" type="boolean">Whether the rule is active.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+    <ResponseField name="updated_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl "http://localhost:8031/api/v1/notifications/rules?page=1&limit=20"
+```
+
+---
+
+## Create notification rule
+
+`POST /api/v1/notifications/rules`
+
+Creates a new notification rule. Returns `201 Created` on success.
+
+### Request body
+
+<ParamField body="name" type="string" required>
+  Display name. 1–255 characters.
+</ParamField>
+
+<ParamField body="trigger_event" type="string" required>
+  Event that activates this rule. One of `on_new_record`, `on_ai_processed`, `on_task_failed`.
+</ParamField>
+
+<ParamField body="notifier_type" type="string" required>
+  Delivery channel. One of `webhook`, `feishu`, `dingtalk`, `wecom`, `email`.
+</ParamField>
+
+<ParamField body="notifier_config" type="object">
+  Channel-specific configuration. For webhook/feishu/dingtalk/wecom, typically includes a `url` field. For email, includes `to`, and optionally `subject`. Defaults to `{}`.
+</ParamField>
+
+<ParamField body="source_id" type="string">
+  Optional source ID to scope the rule. Omit to match all sources.
+</ParamField>
+
+<ParamField body="filter_conditions" type="object">
+  Optional JSON logic conditions evaluated against the record before sending. Omit to send unconditionally.
+</ParamField>
+
+<ParamField body="enabled" type="boolean" default="true">
+  Whether the rule starts enabled.
+</ParamField>
+
+```bash
+curl -X POST http://localhost:8031/api/v1/notifications/rules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Feishu on new record",
+    "trigger_event": "on_new_record",
+    "notifier_type": "feishu",
+    "notifier_config": {
+      "url": "https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx"
+    },
+    "enabled": true
+  }'
+```
+
+---
+
+## Get notification rule
+
+`GET /api/v1/notifications/rules/{rule_id}`
+
+Retrieves a single notification rule by ID.
+
+### Path parameters
+
+<ParamField path="rule_id" type="string" required>
+  Rule UUID.
+</ParamField>
+
+```bash
+curl http://localhost:8031/api/v1/notifications/rules/rule_yza567
+```
+
+---
+
+## Update notification rule
+
+`PATCH /api/v1/notifications/rules/{rule_id}`
+
+Partially updates a notification rule. Only fields included in the request body are changed.
+
+### Path parameters
+
+<ParamField path="rule_id" type="string" required>
+  Rule UUID.
+</ParamField>
+
+### Request body
+
+<ParamField body="name" type="string">
+  Updated display name.
+</ParamField>
+
+<ParamField body="trigger_event" type="string">
+  Updated trigger event.
+</ParamField>
+
+<ParamField body="notifier_type" type="string">
+  Updated delivery channel.
+</ParamField>
+
+<ParamField body="notifier_config" type="object">
+  Replacement channel configuration.
+</ParamField>
+
+<ParamField body="filter_conditions" type="object">
+  Replacement filter conditions.
+</ParamField>
+
+<ParamField body="enabled" type="boolean">
+  Enable or disable the rule.
+</ParamField>
+
+```bash
+curl -X PATCH http://localhost:8031/api/v1/notifications/rules/rule_yza567 \
+  -H "Content-Type: application/json" \
+  -d '{ "enabled": false }'
+```
+
+---
+
+## Delete notification rule
+
+`DELETE /api/v1/notifications/rules/{rule_id}`
+
+Permanently deletes a notification rule and all associated delivery logs (cascade delete).
+
+### Path parameters
+
+<ParamField path="rule_id" type="string" required>
+  Rule UUID.
+</ParamField>
+
+```bash
+curl -X DELETE http://localhost:8031/api/v1/notifications/rules/rule_yza567
+```
+
+---
+
+## List notification logs
+
+`GET /api/v1/notifications/logs`
+
+Returns a paginated list of notification delivery attempts, ordered by creation time descending.
+
+### Query parameters
+
+<ParamField query="rule_id" type="string">
+  Filter logs for a specific rule.
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number. Must be ≥ 1.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="20">
+  Items per page. Accepts 1–100.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="NotificationLogRead[]">
+  Array of log objects.
+  <Expandable title="NotificationLogRead properties">
+    <ResponseField name="id" type="string">Log entry ID (UUID).</ResponseField>
+    <ResponseField name="rule_id" type="string">ID of the rule that triggered this notification.</ResponseField>
+    <ResponseField name="record_id" type="string">ID of the record that triggered this notification. `null` for task failure events.</ResponseField>
+    <ResponseField name="status" type="string">Delivery status: `sent` or `failed`.</ResponseField>
+    <ResponseField name="response_data" type="object">Raw response from the notification channel. `null` if not available.</ResponseField>
+    <ResponseField name="error_message" type="string">Error description if delivery failed. `null` on success.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl "http://localhost:8031/api/v1/notifications/logs?rule_id=rule_yza567&page=1&limit=20"
+```

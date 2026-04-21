@@ -1,0 +1,169 @@
+---
+title: "Database Configuration: SQLite and PostgreSQL Guide"
+description: "Switch OpenCLI Admin between SQLite and PostgreSQL by changing DATABASE_URL. Covers Alembic migrations, Docker Compose Postgres profile, and backup strategies."
+---
+
+OpenCLI Admin uses [SQLAlchemy 2.0](https://docs.sqlalchemy.org/en/20/) with full async support via `asyncpg` (PostgreSQL) and `aiosqlite` (SQLite). The active database is controlled by a single `DATABASE_URL` environment variable. Migrations are managed by [Alembic](https://alembic.sqlalchemy.org/) and run automatically on startup.
+
+## Supported databases
+
+<Tabs>
+  <Tab title="SQLite (default)">
+    SQLite requires zero infrastructure. The database is a single file at `./opencli_admin.db` (or `/data/opencli_admin.db` inside Docker containers). It is the recommended choice for personal use, development, and small single-machine deployments.
+
+    OpenCLI Admin enables WAL mode and `NORMAL` synchronous writes on every SQLite connection:
+
+    ```python backend/database.py
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    ```
+
+    WAL mode allows concurrent reads while a write is in progress, which improves throughput for the dashboard's real-time polling.
+
+    **Connection string:**
+
+    ```bash .env
+    DATABASE_URL=sqlite+aiosqlite:///./opencli_admin.db
+    ```
+
+    When running under Docker Compose the path is absolute so the file lands on the named volume:
+
+    ```bash docker-compose environment
+    DATABASE_URL=sqlite+aiosqlite:////data/opencli_admin.db
+    ```
+
+    <Note>
+      SQLite uses `NullPool` — each async session opens and closes its own connection rather than borrowing from a shared pool. This avoids the locking contention that arises with SQLite's single-writer model under concurrent async workloads.
+    </Note>
+  </Tab>
+  <Tab title="PostgreSQL">
+    PostgreSQL is recommended for production deployments, teams, and any setup running Celery workers. It supports full connection pooling via `QueuePool` and handles concurrent writes from multiple worker processes without contention.
+
+    **Connection string:**
+
+    ```bash .env
+    DATABASE_URL=postgresql+asyncpg://opencli:opencli_secret@localhost:5432/opencli_admin
+    ```
+
+    Replace `opencli`, `opencli_secret`, `localhost`, `5432`, and `opencli_admin` with your actual credentials and host.
+
+    <Tip>
+      The Docker Compose file includes a `postgres` profile that starts a pre-configured PostgreSQL 16 container. See [Docker Compose setup](#docker-compose-postgres-profile) below.
+    </Tip>
+  </Tab>
+</Tabs>
+
+## Switching databases
+
+Changing the database requires only one `.env` update. Stop the application, update `DATABASE_URL`, then restart — Alembic will apply all pending migrations automatically on the next boot.
+
+```bash .env
+# SQLite (default)
+DATABASE_URL=sqlite+aiosqlite:///./opencli_admin.db
+
+# PostgreSQL
+DATABASE_URL=postgresql+asyncpg://opencli:opencli_secret@localhost:5432/opencli_admin
+```
+
+<Warning>
+  Switching database engines does **not** migrate your existing data. If you need to preserve records when moving from SQLite to PostgreSQL, export and import data manually before switching the `DATABASE_URL`.
+</Warning>
+
+## Docker Compose postgres profile
+
+The included `docker-compose.yml` ships a `postgres` service behind a `postgres` profile. Start it alongside the API:
+
+```bash terminal
+docker compose --profile postgres up -d
+```
+
+The service uses these defaults (overridable in `.env`):
+
+| Variable | Default |
+|---|---|
+| `POSTGRES_DB` | `opencli_admin` |
+| `POSTGRES_USER` | `opencli` |
+| `POSTGRES_PASSWORD` | `opencli_secret` |
+
+Update your `.env` to point the API at the container:
+
+```bash .env
+DATABASE_URL=postgresql+asyncpg://opencli:opencli_secret@postgres:5432/opencli_admin
+POSTGRES_DB=opencli_admin
+POSTGRES_USER=opencli
+POSTGRES_PASSWORD=opencli_secret
+```
+
+The postgres container includes a health check (`pg_isready`) so the API waits for the database to be ready before accepting connections.
+
+## Migrations
+
+Database schema changes are managed by Alembic. The migration configuration lives in `alembic.ini` at the repository root.
+
+**Migrations run automatically** when the API starts. The `run_migrations()` function in `backend/database.py` calls `alembic upgrade head` inside an async thread. For databases that were created before Alembic was introduced (identified by the presence of a `data_sources` table but no `alembic_version` table), the function stamps the database at the initial revision before upgrading so no tables are recreated.
+
+To run migrations manually:
+
+```bash terminal
+alembic upgrade head
+```
+
+To generate a new migration after changing a SQLAlchemy model:
+
+```bash terminal
+alembic revision --autogenerate -m "describe your change"
+alembic upgrade head
+```
+
+## Backup recommendations
+
+<Tabs>
+  <Tab title="SQLite">
+    The entire database is contained in a single file. Back it up by copying the file while the application is stopped, or use SQLite's online backup API.
+
+    **Simple file copy (application stopped):**
+
+    ```bash terminal
+    docker compose stop api worker beat
+    cp /path/to/opencli_admin.db /backup/opencli_admin_$(date +%Y%m%d).db
+    docker compose start api worker beat
+    ```
+
+    **Online backup with SQLite CLI (application running):**
+
+    ```bash terminal
+    sqlite3 opencli_admin.db ".backup '/backup/opencli_admin_$(date +%Y%m%d).db'"
+    ```
+
+    Because WAL mode is enabled, the `.backup` command produces a consistent snapshot even while writes are in progress.
+  </Tab>
+  <Tab title="PostgreSQL">
+    Use `pg_dump` for consistent logical backups.
+
+    **Backup:**
+
+    ```bash terminal
+    pg_dump -h localhost -U opencli -d opencli_admin \
+      -F c -f /backup/opencli_admin_$(date +%Y%m%d).dump
+    ```
+
+    **Restore:**
+
+    ```bash terminal
+    pg_restore -h localhost -U opencli -d opencli_admin \
+      --clean /backup/opencli_admin_20240101.dump
+    ```
+
+    For Docker Compose deployments, run `pg_dump` inside the container:
+
+    ```bash terminal
+    docker compose exec postgres pg_dump \
+      -U opencli -d opencli_admin -F c \
+      > /backup/opencli_admin_$(date +%Y%m%d).dump
+    ```
+
+    <Tip>
+      Schedule daily backups with a cron job and retain at least 7 days of history. Store backups off-host (e.g., S3, a NAS, or a remote server) to protect against disk failure.
+    </Tip>
+  </Tab>
+</Tabs>

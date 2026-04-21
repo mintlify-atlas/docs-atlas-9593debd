@@ -1,0 +1,201 @@
+---
+title: "Schedules API: Cron-Based Automated Collection Triggers"
+description: "Create and manage cron schedules that automatically trigger data source collection on a recurring or one-time basis with timezone support."
+---
+
+Schedules attach a cron expression to a data source so that collection tasks fire automatically. Each schedule stores a standard 5-field cron expression, a timezone, optional parameters passed to the collection run, and an optional binding to a specific AI agent or edge node. One-time schedules disable themselves after their first successful execution.
+
+---
+
+## List schedules
+
+`GET /api/v1/schedules`
+
+Returns a paginated list of cron schedules.
+
+### Query parameters
+
+<ParamField query="source_id" type="string">
+  Filter schedules belonging to a specific source.
+</ParamField>
+
+<ParamField query="enabled" type="boolean">
+  Filter by enabled state. Omit to return all schedules.
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number. Must be ≥ 1.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="20">
+  Items per page. Accepts 1–100.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="CronScheduleRead[]">
+  Array of schedule objects.
+  <Expandable title="CronScheduleRead properties">
+    <ResponseField name="id" type="string">Unique schedule ID (UUID).</ResponseField>
+    <ResponseField name="source_id" type="string">ID of the bound data source.</ResponseField>
+    <ResponseField name="agent_id" type="string">Optional ID of the AI agent to use for this run.</ResponseField>
+    <ResponseField name="name" type="string">Display name.</ResponseField>
+    <ResponseField name="cron_expression" type="string">5-field cron expression (e.g., `0 * * * *`).</ResponseField>
+    <ResponseField name="timezone" type="string">IANA timezone string (e.g., `UTC`, `Asia/Shanghai`).</ResponseField>
+    <ResponseField name="parameters" type="object">Extra parameters forwarded to the collection run.</ResponseField>
+    <ResponseField name="enabled" type="boolean">Whether the schedule is active.</ResponseField>
+    <ResponseField name="is_one_time" type="boolean">If `true`, the schedule disables itself after first execution.</ResponseField>
+    <ResponseField name="last_run_at" type="string">ISO 8601 UTC timestamp of the last execution, or `null`.</ResponseField>
+    <ResponseField name="next_run_at" type="string">ISO 8601 UTC timestamp of the next scheduled execution, or `null`.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+    <ResponseField name="updated_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl "http://localhost:8031/api/v1/schedules?source_id=src_abc123&enabled=true"
+```
+
+---
+
+## Create schedule
+
+`POST /api/v1/schedules`
+
+Creates a new cron schedule. Returns `422 Unprocessable Entity` if `cron_expression` is invalid.
+
+### Request body
+
+<ParamField body="source_id" type="string" required>
+  ID of the data source to schedule.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Display name. 1–255 characters.
+</ParamField>
+
+<ParamField body="cron_expression" type="string" required>
+  Standard 5-field cron expression: `minute hour day-of-month month day-of-week`. For example, `0 * * * *` runs every hour at minute 0. `*/30 * * * *` runs every 30 minutes.
+</ParamField>
+
+<ParamField body="timezone" type="string" default="UTC">
+  IANA timezone string used to interpret the cron expression. For example, `Asia/Shanghai` or `America/New_York`.
+</ParamField>
+
+<ParamField body="parameters" type="object">
+  Optional key-value parameters forwarded to the collection run. Defaults to `{}`.
+</ParamField>
+
+<ParamField body="enabled" type="boolean" default="true">
+  Whether the schedule starts enabled.
+</ParamField>
+
+<ParamField body="is_one_time" type="boolean" default="false">
+  When `true`, the schedule is automatically disabled after its first execution.
+</ParamField>
+
+<ParamField body="agent_id" type="string">
+  Optional AI agent ID to bind to this schedule's runs.
+</ParamField>
+
+<Note>
+The cron expression must be a valid 5-field expression. The server validates it before saving and returns `422` with the message `"Invalid cron expression"` if it fails.
+</Note>
+
+```bash
+curl -X POST http://localhost:8031/api/v1/schedules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_id": "src_abc123",
+    "name": "Hourly HN collection",
+    "cron_expression": "0 * * * *",
+    "timezone": "UTC",
+    "enabled": true
+  }'
+```
+
+---
+
+## Get schedule
+
+`GET /api/v1/schedules/{schedule_id}`
+
+Retrieves a single schedule by ID.
+
+### Path parameters
+
+<ParamField path="schedule_id" type="string" required>
+  Schedule UUID.
+</ParamField>
+
+```bash
+curl http://localhost:8031/api/v1/schedules/sch_xyz789
+```
+
+---
+
+## Update schedule
+
+`PATCH /api/v1/schedules/{schedule_id}`
+
+Partially updates a schedule. Only fields included in the request body are changed. If `cron_expression` is included, it is validated before saving.
+
+### Path parameters
+
+<ParamField path="schedule_id" type="string" required>
+  Schedule UUID.
+</ParamField>
+
+### Request body
+
+<ParamField body="name" type="string">
+  Updated display name.
+</ParamField>
+
+<ParamField body="cron_expression" type="string">
+  Updated cron expression. Validated before saving.
+</ParamField>
+
+<ParamField body="timezone" type="string">
+  Updated IANA timezone string.
+</ParamField>
+
+<ParamField body="parameters" type="object">
+  Replacement parameters object.
+</ParamField>
+
+<ParamField body="enabled" type="boolean">
+  Enable or disable the schedule.
+</ParamField>
+
+<ParamField body="is_one_time" type="boolean">
+  Toggle one-time execution mode.
+</ParamField>
+
+<ParamField body="agent_id" type="string">
+  Update or clear the bound agent ID.
+</ParamField>
+
+```bash
+curl -X PATCH http://localhost:8031/api/v1/schedules/sch_xyz789 \
+  -H "Content-Type: application/json" \
+  -d '{ "cron_expression": "0 9 * * 1-5", "timezone": "Asia/Shanghai" }'
+```
+
+---
+
+## Delete schedule
+
+`DELETE /api/v1/schedules/{schedule_id}`
+
+Permanently deletes a schedule. Does not affect tasks or records already created by this schedule.
+
+### Path parameters
+
+<ParamField path="schedule_id" type="string" required>
+  Schedule UUID.
+</ParamField>
+
+```bash
+curl -X DELETE http://localhost:8031/api/v1/schedules/sch_xyz789
+```

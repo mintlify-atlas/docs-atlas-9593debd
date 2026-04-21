@@ -1,0 +1,143 @@
+---
+title: "Tasks and Records: Monitor Runs and Browse Collected Data"
+description: "Track collection jobs step by step in Tasks, then search, inspect, and bulk-manage the normalized records the pipeline stores after each successful run."
+---
+
+The **Tasks** and **Records** pages give you full visibility into the collection pipeline. Tasks show the operational view — what ran, when, on which node, and whether it succeeded. Records show the data view — every item the pipeline collected, normalized, and enriched. Both pages are read-heavy: most of what you do here is inspect, search, and occasionally clean up.
+
+---
+
+## Tasks
+
+A `CollectionTask` is created each time a collection job is triggered, whether by a schedule, a webhook, or a manual trigger from the dashboard. Each task progresses through a set of statuses and records a step-by-step execution trace.
+
+### Task statuses
+
+| Status | Meaning |
+|--------|---------|
+| `pending` | Created but not yet dispatched to an executor |
+| `running` | Currently being executed by a worker |
+| `completed` | Finished successfully |
+| `failed` | Encountered an unrecoverable error |
+| `cancelled` | Stopped before completion |
+
+### Execution trace
+
+Each task run (`TaskRun`) produces a sequence of `TaskRunEvent` records. These events map to the pipeline steps:
+
+| Step | Description |
+|------|-------------|
+| `trigger` | Task created and dispatched |
+| `collect` | Channel plugin fetches raw data from the source |
+| `normalize` | Raw items are mapped to standard fields |
+| `store` | Deduplicated records written to the database |
+| `ai_process` | AI agent analyzes and tags each record |
+| `notify` | Notification rules evaluated and alerts sent |
+| `complete` | Pipeline finished successfully |
+| `failed` | Pipeline stopped with an error |
+
+Each event carries a `level` (`info`, `warning`, or `error`), a `message`, an optional `detail` object, and an `elapsed_ms` timestamp relative to the run start. Open a task in the dashboard to see the full trace as a chronological log.
+
+### Triggering a task manually
+
+<Steps>
+  <Step title="Open Tasks">
+    Navigate to **Tasks** in the sidebar. Use the source filter or status filter to find the source you want to run.
+  </Step>
+  <Step title="Click Trigger">
+    Click **Trigger** (or use the trigger button on the source card in Data Sources). A dialog opens.
+  </Step>
+  <Step title="Set optional overrides">
+    Optionally specify an **Agent node** to override routing for this run only. You can also pass extra **parameters** as a JSON object.
+  </Step>
+  <Step title="Submit">
+    Click **Run**. The API returns `202 Accepted` immediately and the task begins executing asynchronously. Refresh the task list to track progress.
+  </Step>
+</Steps>
+
+<Note>
+  Manual trigger accepts a `priority` field (1–10, where 10 is highest). Higher-priority tasks are dispatched before lower-priority ones in the queue.
+</Note>
+
+### Filtering and searching tasks
+
+The Tasks page supports filtering by:
+
+- **Source** — show tasks for a specific data source
+- **Status** — filter by `pending`, `running`, `completed`, `failed`, or `cancelled`
+- **Pagination** — up to 100 tasks per page
+
+Click any task row to expand the run history and view all execution attempts with their duration, record count, and node URL.
+
+---
+
+## Records
+
+A `CollectedRecord` represents a single data item produced by a collection run. Records are the persistent output of the pipeline. Each record stores the raw channel output, the normalized fields, and any AI enrichment added downstream.
+
+### Record structure
+
+| Field | Description |
+|-------|-------------|
+| `raw_data` | Original item as returned by the channel plugin, before any transformation |
+| `normalized_data` | Standard fields extracted by the normalization step: `title`, `url`, `content`, `author`, `published_at`, plus `extra_*` fields |
+| `ai_enrichment` | Output from the AI agent: `summary`, `tags`, and any custom fields defined in the prompt template |
+| `content_hash` | SHA-256 hash of the normalized content, used for deduplication |
+| `status` | Processing state: `raw` → `normalized` → `ai_processed` → `notified` (or `error`) |
+
+### Deduplication
+
+Before writing a record, the pipeline computes a SHA-256 hash of the normalized content and checks for an existing record with the same `(source_id, content_hash)` pair. Duplicate items are silently skipped, so rerunning the same source never produces duplicate entries.
+
+### Full-text search
+
+The **Records** page includes a search bar that queries across both `normalized_data` and `raw_data`. This lets you find records by title, content snippet, author name, or any field in the raw channel output.
+
+### Expanding a record
+
+Click any row to expand it. The expanded view shows:
+
+- **Formatted JSON** of `raw_data` and `normalized_data` for easy inspection
+- **AI analysis** panel displaying `summary`, `tags`, and other enrichment fields if AI processing has run
+- Source name and the task that produced the record
+
+### Filtering records
+
+Use the filters at the top of the Records page to narrow results:
+
+- **Source** — show records from a specific data source
+- **Task** — show records produced by a particular task
+- **Status** — filter by processing status
+- **Search** — full-text query across normalized and raw data
+
+### Bulk delete
+
+Select multiple records using the checkboxes and click **Delete selected**. This calls `POST /api/v1/records/batch-delete` with the selected IDs. To delete all records for a source, use the **Clear all** option (optionally filtered by source ID).
+
+<Warning>
+  Record deletion is permanent. If you need to rerun a source and refresh stale records, delete old records first and then trigger a new task.
+</Warning>
+
+---
+
+## Pipeline flow summary
+
+```
+Trigger (manual / scheduled / webhook)
+  ↓
+CollectionTask created
+  ↓
+Agent routing
+  ↓
+Channel collect  ──→  raw_data per item
+  ↓
+Normalize        ──→  title / url / content / author / published_at / extra_*
+  ↓
+SHA-256 dedup    ──→  skip if (source_id, content_hash) already exists
+  ↓
+Store            ──→  CollectedRecord (status: normalized)
+  ↓
+AI process       ──→  ai_enrichment: summary + tags (status: ai_processed)
+  ↓
+Notify           ──→  Webhook / Feishu / DingTalk / WeCom / Email (status: notified)
+```

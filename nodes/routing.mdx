@@ -1,0 +1,86 @@
+---
+title: "Task Routing: How Agents Are Selected for Each Run"
+description: "Understand how OpenCLI Admin selects which edge node handles each collection task, from manual one-time overrides down to automatic idle-node assignment."
+---
+
+When a collection task runs, OpenCLI Admin must decide which node executes it. Different nodes may be logged into different accounts, sit in different network regions, or be bound to specific platforms—so the routing decision matters for correctness, not just performance. The system evaluates four priority levels in order and uses the first match.
+
+## Priority levels
+
+The table below summarizes the full priority chain. Higher priority values always win.
+
+| Priority | Entry point | Scope |
+|---|---|---|
+| 1 — highest | Manual override at trigger time | This run only |
+| 2 | Schedule binding | Every run of that schedule |
+| 3 | Site binding in Node Management | Any task targeting that platform |
+| 4 — fallback | Auto-assign | Picks an idle available node |
+
+```
+Trigger (manual / cron / webhook)
+  ↓
+Agent routing
+  ├─ 1. Manual override?         → use specified node (this run only)
+  ├─ 2. Schedule has a binding?  → use that node every time
+  ├─ 3. Site binding matches?    → use node bound to this platform
+  └─ 4. Auto-assign              → pick any idle node
+```
+
+## Priority 1 — manual override
+
+When triggering a task manually from the UI, an optional **Node** selector lets you pick any online node for that single run. The selection does not persist; the next run reverts to the lower-priority rules.
+
+Use manual override to:
+- Test a new node before committing it to a schedule.
+- Re-run a failed task on a different node.
+- Quickly switch accounts without changing site bindings.
+
+## Priority 2 — schedule binding
+
+The schedule creation form includes a **Node** field. When set, every automated run of that schedule is sent to the specified node. Other schedules for the same platform are unaffected.
+
+This is useful when you have multiple accounts for the same platform: schedule A → node-1 (account A), schedule B → node-2 (account B).
+
+## Priority 3 — site binding
+
+In **Node Management**, each node's detail panel lets you bind one or more platforms (sites) to that node. Any task targeting a bound platform is automatically routed there, regardless of which schedule triggered it.
+
+Example configuration:
+
+| Node | Bound sites |
+|---|---|
+| agent-mac-b | Bilibili, Xiaohongshu, Weibo |
+| agent-mac-c | Twitter/X, YouTube, LinkedIn |
+| agent-cloud | Hacker News, BBC, RSS feeds |
+
+With this setup you never need to manually specify nodes when adding new schedules for these platforms.
+
+<Tip>
+Site binding is the recommended approach for stable multi-account clusters. Configure it once in Node Management and the routing is automatic for all future tasks on those platforms.
+</Tip>
+
+## Priority 4 — auto-assign
+
+If none of the higher-priority rules match, the center picks any idle, online node from the pool. This is the default for tasks without any binding configured.
+
+Auto-assign works well for:
+- Single-node setups where there is only one choice.
+- Public data sources (Hacker News, RSS, BBC) that do not require a specific account.
+- Early-stage setups before site bindings are configured.
+
+## Why routing matters
+
+Many platforms require an active login session stored in the Chrome profile on a specific node. Routing the wrong task to the wrong node results in a failed collection because the target browser is not authenticated for that platform.
+
+<CardGroup cols={2}>
+  <Card title="Account isolation" icon="lock">
+    Each node's Chrome profile is independent. Logging into Bilibili on node-1 does not affect node-2. Routing ensures the task always reaches the node holding the right session.
+  </Card>
+  <Card title="Geographic correctness" icon="map-pin">
+    Some platforms serve different content or impose restrictions based on the requester's IP. Routing to a node in the right region ensures consistent results.
+  </Card>
+</CardGroup>
+
+<Note>
+The node URL recorded on each `TaskRun` row (`node_url` column) lets you trace exactly which node handled any past run. This is visible in the task run detail view.
+</Note>

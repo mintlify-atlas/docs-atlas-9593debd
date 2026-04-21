@@ -1,80 +1,188 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Quickstart: Run Your First OpenCLI Admin Deployment"
+description: "Docker Compose or native shell — two paths to a running instance. Covers prerequisites, startup commands, service URLs, and first-time platform login."
 ---
 
-## Get started in three steps
+This guide gets you from zero to a working dashboard as quickly as possible. There are two paths: **Docker** (recommended for most users — no local Python or Node.js required) and **Native Shell** (best for development or when you already have Chrome and Python set up locally). Both paths expose the same dashboard on port `8030` and API docs on port `8031`.
 
-Get your documentation site running locally and make your first customization.
+<Tabs>
+  <Tab title="Docker (recommended)">
 
-### Step 1: Set up your local environment
+    Docker Compose pulls pre-built images from Docker Hub and starts the API, frontend, and a built-in agent container in one command.
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    ### Prerequisites
 
-### Step 2: Deploy your changes
+    - Docker Engine 24+ and Docker Compose v2
+    - Chrome installed on the host machine (only required for the standard agent image; see the tip below)
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ### Steps
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    <Steps>
+      <Step title="Copy the environment file">
+        Clone or download the repository, then copy the example environment file:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+        ```bash
+        cp .env.example .env
+        ```
+      </Step>
 
-### Step 3: Go live
+      <Step title="Set a secure SECRET_KEY">
+        Open `.env` and replace the placeholder value:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+        ```bash
+        SECRET_KEY=change-me-in-production-use-long-random-string
+        ```
+
+        Replace it with a long random string before exposing the service to any network.
+
+        <Warning>
+          The default `SECRET_KEY` value is public. Always replace it before running in any environment beyond strictly localhost.
+        </Warning>
+      </Step>
+
+      <Step title="Start host Chrome with remote debugging (standard image only)">
+        The default agent image (~100 MB) connects to Chrome running on your Docker host via `host.docker.internal`. Start Chrome with CDP enabled before running Compose:
+
+        <CodeGroup>
+
+        ```bash macOS
+        /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+            --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0 \
+            --no-first-run --no-default-browser-check &
+        ```
+
+        ```bash Linux
+        google-chrome \
+            --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0 \
+            --no-first-run --no-default-browser-check &
+        ```
+
+        </CodeGroup>
+
+        <Tip>
+          To skip this step, use the chrome-embedded agent image by setting `CHROME_SUFFIX=-chrome` in `.env`. That image is ~450 MB but is fully self-contained — no host Chrome required.
+        </Tip>
+      </Step>
+
+      <Step title="Start all services">
+        ```bash
+        docker compose up -d
+        ```
+
+        Docker pulls `xjh1994/opencli-admin-{api,frontend,agent}:0.3.6` from Docker Hub on first run.
+      </Step>
+
+      <Step title="Open the dashboard">
+        Once the API health check passes (usually within 20 seconds):
+
+        | Service | URL |
+        |---------|-----|
+        | Dashboard | http://localhost:8030 |
+        | API docs | http://localhost:8031/docs |
+        | Agent noVNC | http://localhost:3010 |
+      </Step>
+
+      <Step title="Log in to collection platform accounts">
+        Platforms like Xiaohongshu, Bilibili, Twitter/X, and LinkedIn require a browser login before collection works. Open the noVNC viewer to log in from within the agent's browser:
+
+        - **Agent 1:** http://localhost:3010
+        - **Agent 2:** http://localhost:3011
+        - **Agent 3:** http://localhost:3012
+
+        Login state is saved in an isolated Docker volume per agent instance, so you only need to do this once per agent.
+      </Step>
+    </Steps>
+
+  </Tab>
+  <Tab title="Native Shell">
+
+    The native shell path runs the backend and frontend directly on your machine, reusing your existing Chrome installation. Both the backend (uvicorn `--reload`) and the frontend (Vite HMR) run in hot-reload mode, making it ideal for development.
+
+    ### Prerequisites
+
+    - Python 3.11+
+    - Node.js 18+
+    - Google Chrome or Chromium installed
+    - [opencli Browser Bridge extension](https://github.com/jackwener/opencli/blob/main/README.zh-CN.md#playwright-mcp-bridge-%E6%89%A9%E5%B1%95%E9%85%8D%E7%BD%AE) installed in Chrome
+
+    ### Steps
+
+    <Steps>
+      <Step title="Copy the environment file">
+        ```bash
+        cp .env.example .env
+        ```
+      </Step>
+
+      <Step title="Set a secure SECRET_KEY">
+        Edit `.env` and replace the placeholder:
+
+        ```bash
+        SECRET_KEY=change-me-in-production-use-long-random-string
+        ```
+      </Step>
+
+      <Step title="Run the startup script">
+        ```bash
+        ./start.sh
+        ```
+
+        `start.sh` automatically handles everything in sequence:
+
+        - Creates a Python virtual environment in `.venv`
+        - Installs all backend Python dependencies
+        - Checks for `opencli` and offers to install it via npm if missing
+        - Initializes the SQLite database and runs migrations
+        - Starts Chrome with CDP on port `9222` using the profile at `~/.opencli-admin/chrome-profile/`
+        - Starts the FastAPI backend with hot reload on port `8031`
+        - Installs frontend npm dependencies and starts the Vite dev server with HMR on port `8030`
+      </Step>
+
+      <Step title="Open the dashboard">
+        | Service | URL |
+        |---------|-----|
+        | Dashboard | http://localhost:8030 |
+        | API docs | http://localhost:8031/docs |
+      </Step>
+
+      <Step title="Log in to collection platform accounts">
+        A Chrome window opens automatically. Navigate to any platform you want to collect from (Bilibili, Twitter/X, LinkedIn, etc.) and log in normally. Your login state is saved to `~/.opencli-admin/chrome-profile/` and persists across restarts.
+      </Step>
+    </Steps>
+
+  </Tab>
+</Tabs>
+
+## CLI flags (native shell)
+
+Pass flags to `start.sh` to skip components you do not need:
+
+```bash
+./start.sh --no-chrome      # Skip Chrome — useful for RSS/API sources only
+./start.sh --no-frontend    # Start backend API only, no Vite dev server
+./start.sh --cdp-port 9223  # Use a custom Chrome CDP port
+```
+
+## Stopping
+
+<Tabs>
+  <Tab title="Docker">
+    ```bash
+    docker compose down
+    ```
+  </Tab>
+  <Tab title="Native Shell">
+    Press `Ctrl+C` in the terminal running `start.sh`. The script traps the signal and kills all child processes — Chrome, uvicorn, and Vite — automatically.
+  </Tab>
+</Tabs>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Docker deployment" icon="docker" href="/deployment/docker">
+    Multi-agent setup, building from source, environment variable reference, and the chrome-embedded image variant.
+  </Card>
+  <Card title="Native shell deployment" icon="terminal" href="/deployment/native-shell">
+    CLI flags, Chrome profile location, hot reload details, and headless mode for servers without a display.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

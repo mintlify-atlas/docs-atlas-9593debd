@@ -1,0 +1,108 @@
+---
+title: "Webhooks API: Inbound Webhook-Triggered Collection"
+description: "Trigger a data source collection task from an external system via HTTP POST. Supports per-source HMAC-SHA256 signature verification for secure delivery."
+---
+
+The webhooks endpoint lets external systems trigger a collection task for a specific data source by sending an HTTP POST request. This is useful for event-driven workflows — for example, triggering a scrape whenever a GitHub Actions pipeline completes or when another service emits an event. The request body is passed directly to the collection run as parameters.
+
+---
+
+## Trigger collection via webhook
+
+`POST /api/v1/webhooks/{source_id}`
+
+Creates and dispatches a collection task with `trigger_type: "webhook"` for the given source. Returns `202 Accepted` when the task has been accepted. The source must exist and be enabled.
+
+### Path parameters
+
+<ParamField path="source_id" type="string" required>
+  ID of the data source to collect from.
+</ParamField>
+
+### Request body
+
+The body is parsed as JSON and forwarded as `parameters` to the collection run. Sending an empty body or non-JSON content is accepted — the parameters will be set to `{}` in that case.
+
+### Request headers
+
+<ParamField header="X-Signature-256" type="string">
+  HMAC-SHA256 signature used to verify the authenticity of the webhook payload. Required when a webhook secret is configured. Format: `sha256=<hex-digest>`.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="object">
+  Dispatch result returned by the executor. Content varies by collection mode.
+</ResponseField>
+
+```bash
+curl -X POST http://localhost:8031/api/v1/webhooks/src_abc123 \
+  -H "Content-Type: application/json" \
+  -d '{ "ref": "refs/heads/main", "event": "push" }'
+```
+
+---
+
+## Signature verification
+
+When a webhook secret is configured, the server verifies every request using HMAC-SHA256 before dispatching the task. Requests without a valid signature receive `401 Unauthorized`.
+
+### How the secret is resolved
+
+The server checks for a secret in the following order:
+
+1. The `webhook_secret` field inside the source's `channel_config`.
+2. The `WEBHOOK_SECRET` environment variable (global fallback).
+
+If neither is set, signature verification is skipped and all requests are accepted.
+
+### Setting the global secret
+
+In your `.env` file:
+
+```bash .env
+WEBHOOK_SECRET=your-webhook-secret
+```
+
+### Setting a per-source secret
+
+Include `webhook_secret` in the source's `channel_config` when creating or updating the source:
+
+```bash
+curl -X PATCH http://localhost:8031/api/v1/sources/src_abc123 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "channel_config": {
+      "webhook_secret": "per-source-secret"
+    }
+  }'
+```
+
+### Computing the signature
+
+Generate the signature by computing `HMAC-SHA256` over the raw request body bytes using the secret, then prepend `sha256=`:
+
+```bash
+BODY='{"ref":"refs/heads/main"}'
+SECRET="your-webhook-secret"
+SIG="sha256=$(echo -n "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')"
+
+curl -X POST http://localhost:8031/api/v1/webhooks/src_abc123 \
+  -H "Content-Type: application/json" \
+  -H "X-Signature-256: $SIG" \
+  -d "$BODY"
+```
+
+<Note>
+Compute the HMAC over the exact bytes sent in the request body. Any difference in encoding or whitespace between the signed payload and the actual body will cause verification to fail.
+</Note>
+
+---
+
+## Error responses
+
+| Status | Condition |
+|--------|-----------|
+| `400 Bad Request` | The source exists but is disabled (`"Source is disabled"`). |
+| `401 Unauthorized` | A webhook secret is configured and the `X-Signature-256` header is missing or invalid. |
+| `404 Not Found` | No source with the given `source_id` exists. |

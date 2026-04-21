@@ -1,0 +1,150 @@
+---
+title: "Native Shell Deployment Without Docker for OpenCLI Admin"
+description: "Run OpenCLI Admin on macOS or Linux with local Python, Node.js, and Chrome — backend hot reload, Vite HMR, persistent Chrome profile, no Docker needed."
+---
+
+The native shell deployment runs OpenCLI Admin directly on your operating system, without Docker. It reuses whatever Chrome or Chromium is already installed, stores the browser profile at `~/.opencli-admin/chrome-profile/`, and starts the backend and frontend in hot-reload mode. This path is best suited for local development and single-user personal deployments.
+
+## Prerequisites
+
+Before running `start.sh`, make sure you have:
+
+- **Python 3.11+** — verified automatically by the script
+- **Node.js 18+** — required for the frontend dev server
+- **Google Chrome or Chromium** — the script searches common install paths on macOS and Linux
+- **[opencli Browser Bridge extension](https://github.com/jackwener/opencli/blob/main/README.zh-CN.md#playwright-mcp-bridge-%E6%89%A9%E5%B1%95%E9%85%8D%E7%BD%AE)** — installed in the Chrome profile that `start.sh` opens
+
+<Note>
+  If `opencli` is not installed globally, the startup script detects this and offers to install it via `npm install -g @jackwener/opencli@1.7.4`. You can decline if you only plan to use RSS, API, or web scraper channels.
+</Note>
+
+## Deployment steps
+
+<Steps>
+  <Step title="Copy the environment file">
+    ```bash
+    cp .env.example .env
+    ```
+  </Step>
+
+  <Step title="Edit SECRET_KEY">
+    Open `.env` and replace the placeholder `SECRET_KEY`:
+
+    ```bash
+    SECRET_KEY=change-me-in-production-use-long-random-string
+    ```
+
+    <Warning>
+      The default value is public. Replace it before running, even on localhost, if the API port is reachable from other machines on your network.
+    </Warning>
+  </Step>
+
+  <Step title="Run the startup script">
+    ```bash
+    ./start.sh
+    ```
+
+    The script runs the following sequence automatically:
+
+    1. Loads `.env` into the shell environment
+    2. Verifies Python 3.11+ is available
+    3. Creates `.venv` and activates it (skips creation if it already exists)
+    4. Installs backend Python dependencies with `pip install -e .`
+    5. Checks for `opencli` and prompts to install if missing
+    6. Searches for Chrome or Chromium in standard locations
+    7. Removes stale `SingletonLock` files from a previous crash
+    8. Starts Chrome with CDP on `127.0.0.1:9222` and the profile directory `~/.opencli-admin/chrome-profile/`
+    9. Starts `uvicorn backend.main:app --reload --reload-dir backend` on port `8031`
+    10. Runs `npm install` in `frontend/` then starts `vite --host --port 8030`
+
+    All processes are tracked by PID. `Ctrl+C` triggers a cleanup trap that kills all of them.
+  </Step>
+
+  <Step title="Log in to platform accounts">
+    Chrome opens a window automatically. Navigate to any platform you want to scrape (e.g., `https://twitter.com`, `https://www.bilibili.com`) and log in. The browser profile is saved at:
+
+    ```
+    ~/.opencli-admin/chrome-profile/
+    ```
+
+    Login state persists across restarts. You only need to log in once per platform.
+  </Step>
+
+  <Step title="Open the dashboard">
+    | Service | URL |
+    |---------|-----|
+    | Dashboard | http://localhost:8030 |
+    | API docs | http://localhost:8031/docs |
+  </Step>
+</Steps>
+
+## CLI flags
+
+Pass flags directly to `start.sh` to customize which components start:
+
+```bash
+./start.sh --no-chrome       # Skip Chrome — use when you only need RSS/API/web scraper channels
+./start.sh --no-frontend     # Start backend API only, without the Vite dev server
+./start.sh --cdp-port 9223   # Override the Chrome CDP port (default: 9222)
+./start.sh --api-port 8032   # Override the backend API port (default: from .env or 8031)
+./start.sh --frontend-port 8033  # Override the frontend port (default: from .env or 8030)
+```
+
+Flag precedence: CLI argument > `.env` value > hardcoded default.
+
+## What start.sh does in detail
+
+`start.sh` is a self-contained Bash script (`set -euo pipefail`) that manages all processes under a single PID group. The key behaviors are:
+
+- **Virtual environment**: created at `.venv` in the repository root. Reused on subsequent runs.
+- **Chrome profile**: stored at `~/.opencli-admin/chrome-profile/`. On macOS, the script searches `/Applications/Google Chrome.app/...` first, then falls back to Chromium and system PATH entries. On Linux it tries `google-chrome-stable`, `google-chrome`, `chromium`, and `chromium-browser`.
+- **Headless mode**: if no `$DISPLAY` is set (e.g., SSH session without X forwarding), Chrome starts with `--headless=new --disable-gpu` automatically.
+- **Root mode**: if running as root (uid 0), `--no-sandbox` is added to Chrome flags automatically.
+- **CDP endpoint**: exported as `OPENCLI_CDP_ENDPOINT=http://127.0.0.1:$CDP_PORT` for the backend to consume.
+- **Hot reload**: uvicorn watches `./backend/` for changes. Vite proxies `/api` requests to the backend port defined by `VITE_API_PROXY_TARGET`.
+
+## Chrome profile location
+
+```
+~/.opencli-admin/chrome-profile/
+```
+
+This directory stores all browser state: cookies, localStorage, IndexedDB, and extension data. Back it up if it contains platform login sessions you cannot easily recreate.
+
+<Tip>
+  To reset all login sessions without reinstalling anything, delete the profile directory:
+
+  ```bash
+  rm -rf ~/.opencli-admin/chrome-profile/
+  ```
+
+  The next `start.sh` run creates a fresh profile automatically.
+</Tip>
+
+## Stopping
+
+Press `Ctrl+C` in the terminal where `start.sh` is running. The script's `SIGINT`/`SIGTERM` trap calls `kill` on every PID it started — Chrome, uvicorn, and Vite — then waits for them to exit cleanly.
+
+```
+^C
+[info]  Stopping all services...
+[ ok]   Stopped.
+```
+
+No orphaned processes are left behind.
+
+## Key environment variables
+
+These `.env` variables are most relevant to the native shell deployment:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SECRET_KEY` | `change-me-in-production` | JWT signing key — must be changed |
+| `API_PORT` | `8031` | Backend API port |
+| `FRONTEND_PORT` | `8030` | Frontend dev server port |
+| `COLLECTION_MODE` | `local` | `local` uses the CDP endpoint directly; `agent` routes through registered agent nodes |
+| `OPENCLI_CDP_ENDPOINT` | `http://127.0.0.1:9222` | Set automatically by `start.sh` from `CDP_PORT` |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./opencli_admin.db` | SQLite by default; change to PostgreSQL DSN for production |
+| `TASK_EXECUTOR` | `local` | `local` runs tasks in-process; `celery` requires Redis and a separate worker |
+
+See `.env.example` for the full list of available variables.

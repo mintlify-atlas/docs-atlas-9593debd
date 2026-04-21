@@ -1,0 +1,121 @@
+---
+title: "Schedules: Automate Collection with Cron Expressions"
+description: "Create cron schedules to run data sources automatically — configure frequency, timezone, one-time execution, and bind each schedule to a specific agent node."
+---
+
+Schedules define when OpenCLI Admin automatically runs a collection job for a data source. Each schedule holds a cron expression, a timezone, optional run-time parameters, and an optional binding to a specific agent node. When a schedule fires, it creates a new collection task and routes it through the pipeline — collect, normalize, store, AI, notify — without any manual intervention.
+
+## How schedules relate to tasks
+
+Every time a schedule triggers, the system creates one `CollectionTask` record with `trigger_type: scheduled`. That task runs through the full pipeline. You can inspect the resulting task and its step-by-step trace on the **Tasks** page.
+
+```
+Schedule (cron fires)
+  → CollectionTask created (trigger_type: scheduled)
+  → Agent routing (schedule binding > site binding > auto-assign)
+  → Channel collect → Normalize → Store → AI → Notify
+```
+
+## Creating a schedule
+
+<Steps>
+  <Step title="Open Schedules">
+    Navigate to **Schedules** in the sidebar. Existing schedules are listed with their next-run time, last-run time, and enabled state.
+  </Step>
+  <Step title="Click Add schedule">
+    Click **Add schedule**. A form opens asking for the source, schedule name, cron expression, and optional settings.
+  </Step>
+  <Step title="Choose a source">
+    Select the data source this schedule should collect from. One source can have multiple schedules — for example, a high-frequency schedule for business hours and a low-frequency one overnight.
+  </Step>
+  <Step title="Set the cron expression">
+    Enter a five-field cron expression. The UI validates the expression before saving; an invalid expression returns HTTP 422.
+  </Step>
+  <Step title="Set timezone and one-time flag">
+    Choose a timezone from the dropdown (defaults to `UTC`). Toggle **One-time execution** if the schedule should fire once and then become inactive automatically.
+  </Step>
+  <Step title="Optionally bind an agent">
+    Select an agent node from the **Agent** dropdown. When set, this schedule always dispatches to that node rather than the site-binding or auto-assignment fallback.
+  </Step>
+  <Step title="Save">
+    Click **Save**. The scheduler picks up the new schedule immediately and computes the first `next_run_at` timestamp.
+  </Step>
+</Steps>
+
+## Cron expression format
+
+OpenCLI Admin uses standard five-field cron syntax:
+
+```
+┌─ minute      (0-59)
+│ ┌─ hour       (0-23)
+│ │ ┌─ day of month  (1-31)
+│ │ │ ┌─ month       (1-12)
+│ │ │ │ ┌─ day of week  (0-6, Sunday=0)
+│ │ │ │ │
+* * * * *
+```
+
+Common patterns:
+
+| Expression | Meaning |
+|------------|---------|
+| `*/15 * * * *` | Every 15 minutes |
+| `0 * * * *` | Every hour, on the hour |
+| `0 */6 * * *` | Every 6 hours |
+| `0 8 * * *` | Daily at 08:00 |
+| `0 8 * * 1` | Every Monday at 08:00 |
+| `0 0 1 * *` | First day of every month at midnight |
+| `30 9 15 * *` | 15th of each month at 09:30 |
+
+<Tip>
+  To run a job exactly once at a specific time, use the one-time flag together with a cron expression that matches the desired moment. After it fires, the schedule is automatically disabled.
+</Tip>
+
+## Timezone support
+
+Schedules evaluate their cron expression in the configured timezone. This means `0 8 * * *` always fires at 08:00 in the selected zone regardless of the server's local time or DST transitions. The dashboard shows all timestamps in local browser time.
+
+Supported timezone values follow the IANA tz database format, for example:
+
+- `UTC`
+- `Asia/Shanghai`
+- `America/New_York`
+- `Europe/London`
+
+## Agent node binding
+
+When you bind a schedule to an agent node, it sets the `agent_id` field on every task created by that schedule. The routing priority is:
+
+| Priority | Source | Description |
+|----------|--------|-------------|
+| 1 (highest) | Manual trigger override | Applies to the single triggered task only |
+| 2 | Schedule binding | Used for every task this schedule creates |
+| 3 | Node management site binding | Routes by platform across all tasks |
+| 4 (fallback) | Auto-assign | Picks the next available idle node |
+
+<Note>
+  Binding a schedule to an agent that is offline does not block the task from being created — the task will fail at the dispatch step and log an error. Remove or change the binding if the node is permanently decommissioned.
+</Note>
+
+## Schedule status
+
+| Status | Meaning |
+|--------|---------|
+| **Enabled** | The schedule fires according to its cron expression |
+| **Paused** (disabled) | The schedule is skipped by the scheduler; no tasks are created |
+
+Toggle the **Enabled** switch on any schedule row to pause or resume it without deleting the schedule or losing its configuration.
+
+## Schedule fields reference
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `source_id` | string | Yes | ID of the data source to collect from |
+| `name` | string | Yes | Human-readable label (up to 255 chars) |
+| `cron_expression` | string | Yes | Five-field cron expression |
+| `timezone` | string | No | IANA timezone. Defaults to `UTC` |
+| `parameters` | object | No | Extra run-time parameters merged into the task |
+| `enabled` | boolean | No | Whether the schedule is active. Defaults to `true` |
+| `is_one_time` | boolean | No | Disable after the first successful fire. Defaults to `false` |
+| `agent_id` | string | No | Pin this schedule to a specific agent node |

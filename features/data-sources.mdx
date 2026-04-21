@@ -1,0 +1,185 @@
+---
+title: "Data Sources: Five Channel Types for Every Platform"
+description: "Connect opencli, RSS, REST API, web scraper, and CLI sources with card-based filtering, type search, and one-click connectivity testing from the dashboard."
+---
+
+Data sources are the starting point for every collection job in OpenCLI Admin. Each source represents a single feed, endpoint, or platform you want to monitor. You configure it once, and the pipeline handles the rest: scheduling, deduplication, AI enrichment, and notifications. OpenCLI Admin supports five channel types that cover everything from login-gated social platforms to arbitrary command-line tools.
+
+## Channel types
+
+<CardGroup cols={2}>
+  <Card title="opencli" icon="globe">
+    Browser-based collection using the [opencli](https://github.com/jackwener/opencli) CLI tool. Supports platforms that require a logged-in session — Xiaohongshu, Bilibili, Weibo, Twitter/X, LinkedIn, and more. Runs via Chrome Bridge (Browser Bridge extension) or Chrome DevTools Protocol (CDP).
+  </Card>
+  <Card title="RSS" icon="rss">
+    Feed-based collection powered by feedparser. Works with any RSS 2.0 or Atom feed. No browser required — just a feed URL and an optional entry limit.
+  </Card>
+  <Card title="API" icon="code">
+    Direct REST or GraphQL connections over HTTP. Supports GET and POST methods, Bearer token, Basic auth, and API key authentication. A `result_path` field lets you navigate nested JSON responses.
+  </Card>
+  <Card title="Web scraper" icon="spider">
+    CSS selector–based scraping using httpx and BeautifulSoup. Define a `list_selector` to iterate over repeated elements (e.g., article cards) and per-field selectors to extract title, URL, and other data.
+  </Card>
+  <Card title="CLI" icon="terminal">
+    Wraps any command-line tool as a data source. The command template supports `{{variable}}` placeholders resolved from run-time parameters. Output can be parsed as JSON or as line-delimited plain text.
+  </Card>
+</CardGroup>
+
+## Supported platforms (opencli channel)
+
+The opencli channel gives you access to the following platforms out of the box. Platforms marked with a login requirement need a one-time manual sign-in; public platforms work without credentials.
+
+| Category | Platforms | Login required |
+|----------|-----------|----------------|
+| Chinese social | Xiaohongshu, Bilibili, Zhihu, Weibo, V2EX | Yes (most) |
+| Chinese news/finance | Snowball, Sina Finance 7×24, Boss Zhipin, Ctrip, Xiaoyuzhou | Varies |
+| Global news | Hacker News, BBC, Reuters, Bloomberg, arXiv, Wikipedia | No |
+| Global social | Twitter/X, Reddit, YouTube, LinkedIn, Yahoo Finance, Barchart | Yes (most) |
+
+<Note>
+  Public platforms (Hacker News, BBC, Reuters, arXiv, Wikipedia) can be collected without logging in. For login-required platforms, authenticate once in the browser and your session is persisted in the Chrome profile directory.
+</Note>
+
+## Adding a source
+
+<Steps>
+  <Step title="Open Data Sources">
+    Navigate to **Data Sources** in the sidebar. The card layout shows all configured sources with their channel type badge, enabled/disabled state, and tags.
+  </Step>
+  <Step title="Click Add source">
+    Click the **Add source** button in the top right. A modal opens with a form.
+  </Step>
+  <Step title="Fill in the basics">
+    Enter a **Name** (up to 255 characters), an optional **Description**, and a list of **Tags** for filtering. Then select a **Channel type**.
+  </Step>
+  <Step title="Configure the channel">
+    Fill in the channel-specific fields (see configuration reference below). Required fields vary by type; the form validates before saving.
+  </Step>
+  <Step title="Save and test">
+    Click **Save**. The source appears in the card grid. Click the **Test** button on any card to verify connectivity — the backend runs a live check and returns a `connected` boolean plus any error details.
+  </Step>
+</Steps>
+
+## Channel configuration reference
+
+<Tabs>
+  <Tab title="opencli">
+    The opencli channel invokes the `opencli` CLI binary and parses its structured output.
+
+    | Field | Type | Required | Description |
+    |-------|------|----------|-------------|
+    | `site` | string | Yes | Platform identifier (e.g. `bilibili`, `hackernews`, `twitter`) |
+    | `command` | string | Yes | Subcommand to run (e.g. `trending`, `search`, `feed`) |
+    | `format` | string | No | Output format: `json`, `yaml`, `csv`, `table`, `md`. Defaults to `json` |
+    | `args` | object | No | Named `--option` arguments forwarded to the binary |
+    | `positional_args` | array | No | Positional arguments forwarded to the binary |
+
+    ```json
+    {
+      "site": "hackernews",
+      "command": "trending",
+      "format": "json",
+      "args": { "limit": 30 }
+    }
+    ```
+
+    <Tip>
+      Arguments not recognised by the binary's `--help` output are automatically demoted to positional args, so configs written for older opencli versions continue to work after upgrades.
+    </Tip>
+  </Tab>
+  <Tab title="RSS">
+    | Field | Type | Required | Description |
+    |-------|------|----------|-------------|
+    | `feed_url` | string | Yes | Full URL of the RSS or Atom feed |
+    | `max_entries` | integer | No | Maximum entries to fetch per run. Defaults to 50 |
+    | `timeout` | integer | No | HTTP timeout in seconds. Defaults to 30 |
+
+    ```json
+    {
+      "feed_url": "https://hnrss.org/frontpage",
+      "max_entries": 30
+    }
+    ```
+  </Tab>
+  <Tab title="API">
+    | Field | Type | Required | Description |
+    |-------|------|----------|-------------|
+    | `base_url` | string | Yes | Base URL of the API (e.g. `https://api.example.com`) |
+    | `endpoint` | string | Yes | Path appended to `base_url` (e.g. `/v1/posts`) |
+    | `method` | string | No | HTTP method: `GET` or `POST`. Defaults to `GET` |
+    | `auth` | object | No | Auth config: `type` is `bearer`, `basic`, or `api_key` |
+    | `headers` | object | No | Extra headers. Supports `{{secret:ENV_VAR}}` placeholders |
+    | `params` | object | No | Query parameters (merged with run-time parameters) |
+    | `body` | object | No | Request body for POST requests |
+    | `result_path` | string | No | Dot-separated path into the response JSON (e.g. `data.items`) |
+    | `timeout` | integer | No | Timeout in seconds. Defaults to 30 |
+
+    ```json
+    {
+      "base_url": "https://api.example.com",
+      "endpoint": "/v1/articles",
+      "method": "GET",
+      "auth": { "type": "bearer", "token_env": "EXAMPLE_API_TOKEN" },
+      "result_path": "data.items"
+    }
+    ```
+
+    <Note>
+      Use `{{secret:ENV_VAR}}` in header values to inject environment variables at runtime without storing credentials in the database.
+    </Note>
+  </Tab>
+  <Tab title="Web scraper">
+    | Field | Type | Required | Description |
+    |-------|------|----------|-------------|
+    | `url` | string | Yes | Page URL to scrape |
+    | `selectors` | object | Yes | Map of field names to CSS selectors |
+    | `list_selector` | string | No | CSS selector for repeated container elements |
+    | `headers` | object | No | Custom HTTP headers |
+    | `timeout` | integer | No | Timeout in seconds. Defaults to 30 |
+
+    ```json
+    {
+      "url": "https://news.ycombinator.com",
+      "list_selector": ".athing",
+      "selectors": {
+        "title": ".titleline a",
+        "url": ".titleline a"
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="CLI">
+    | Field | Type | Required | Description |
+    |-------|------|----------|-------------|
+    | `binary` | string | Yes | Executable name or path (e.g. `python`, `/usr/bin/rclone`) |
+    | `command` | array | Yes | Command arguments as a list; supports `{{variable}}` templates |
+    | `output_format` | string | No | `json` (default) or `text` (line-delimited) |
+    | `timeout` | integer | No | Timeout in seconds. Defaults to 60 |
+    | `env` | object | No | Extra environment variables injected into the process |
+    | `defaults` | object | No | Default values for `{{variable}}` placeholders |
+
+    ```json
+    {
+      "binary": "python",
+      "command": ["fetch_posts.py", "--limit", "{{limit}}"],
+      "output_format": "json",
+      "defaults": { "limit": "50" }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Managing sources
+
+The **Data Sources** page provides a card layout with several controls:
+
+- **Search**: Filter by name or description using the search bar.
+- **Type filter**: Narrow the view to a specific channel type using the dropdown.
+- **Enable/disable**: Toggle a source without deleting it. Disabled sources cannot be triggered manually or by a schedule.
+- **Edit**: Opens the same form used during creation.
+- **Test connectivity**: Runs a live health check against the channel backend. Returns `connected: true/false` and any error messages.
+- **Delete**: Removes the source along with all associated schedules, tasks, and records (cascading delete).
+
+<Warning>
+  Deleting a source permanently removes all of its collection tasks, runs, and records. This action cannot be undone.
+</Warning>

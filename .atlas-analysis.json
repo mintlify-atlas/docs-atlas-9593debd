@@ -1,0 +1,109 @@
+{
+  "projectType": "saas",
+  "projectName": "OpenCLI Admin",
+  "projectDescription": "A visual multi-channel data collection, AI tagging, and push notification system built on opencli, supporting distributed Chrome-based scraping across platforms like Xiaohongshu, Weibo, Bilibili, Twitter, and more.",
+  "theme": "aspen",
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "deployment/docker",
+              "deployment/native-shell"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/data-sources",
+              "features/schedules",
+              "features/tasks-records",
+              "features/ai-agents",
+              "features/notifications"
+            ]
+          },
+          {
+            "group": "Distributed Nodes",
+            "pages": [
+              "nodes/overview",
+              "nodes/registration",
+              "nodes/routing",
+              "nodes/chrome-modes"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment",
+              "configuration/database",
+              "configuration/task-executor"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/sources",
+              "api/schedules",
+              "api/tasks",
+              "api/records",
+              "api/nodes",
+              "api/agents",
+              "api/notifications",
+              "api/webhooks"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Visual dashboard with 7-day trend charts and collection statistics",
+    "Multi-channel data sources: opencli, RSS, REST API, Web scraper, CLI",
+    "Distributed edge nodes with WS reverse tunnel or HTTP direct registration",
+    "Multi-account Chrome scraping with Bridge/CDP modes",
+    "AI processing pipeline: Claude, OpenAI, DeepSeek, Kimi, GLM, MiniMax, Ollama",
+    "Push notifications via Webhook, Feishu, DingTalk, WeCom, Email",
+    "Cron-based scheduling with timezone support and agent binding",
+    "Supports 20+ platforms: Xiaohongshu, Bilibili, Weibo, Twitter/X, Reddit, HN, etc.",
+    "One-click Docker deployment with multi-platform (amd64/arm64) images",
+    "Full-text search on collected records with inline AI analysis display"
+  ],
+  "publicApiSurface": [
+    "GET /api/v1/sources — List data sources",
+    "POST /api/v1/sources — Create data source",
+    "GET /api/v1/schedules — List cron schedules",
+    "POST /api/v1/schedules — Create schedule",
+    "GET /api/v1/tasks — List collection tasks",
+    "POST /api/v1/tasks/{task_id}/trigger — Manually trigger task",
+    "GET /api/v1/records — List collected records with full-text search",
+    "GET /api/v1/nodes — List edge nodes",
+    "POST /api/v1/nodes/register — Register edge node (HTTP mode)",
+    "WebSocket /api/v1/nodes/ws — Edge node reverse WS channel",
+    "GET /api/v1/agents — List AI agents",
+    "POST /api/v1/agents — Create AI agent",
+    "GET /api/v1/notifications — List notification channels",
+    "POST /api/v1/webhooks — Inbound webhook trigger",
+    "GET /api/v1/dashboard — Dashboard statistics",
+    "GET /api/v1/nodes/install/agent.sh — One-click agent install script"
+  ]
+}

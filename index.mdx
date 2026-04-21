@@ -1,97 +1,57 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "OpenCLI Admin: Visual Data Collection & AI Processing"
+description: "OpenCLI Admin is a self-hosted data collection platform. Scrape 20+ platforms, tag content with AI, and push notifications to Feishu, DingTalk, WeCom, or Email."
 ---
 
-## Setting up
+OpenCLI Admin is a full-stack, self-hosted data collection platform that lets you visually manage scraping jobs across 20+ platforms — including Xiaohongshu, Bilibili, Weibo, Twitter/X, Hacker News, and more. Built on top of [opencli](https://github.com/jackwener/opencli), it adds a web dashboard, AI-powered content tagging, distributed node management, and push notification delivery — all without writing code.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get OpenCLI Admin running locally or via Docker in under 5 minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Docker Deployment" icon="docker" href="/deployment/docker">
+    Deploy with Docker Compose for a production-ready, single-command setup.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Data Sources" icon="database" href="/features/data-sources">
+    Connect opencli, RSS, REST APIs, web scrapers, and CLI tools as sources.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Distributed Nodes" icon="network-wired" href="/nodes/overview">
+    Register remote machines as collection agents and route tasks automatically.
   </Card>
-</Columns>
+  <Card title="AI Agents" icon="robot" href="/features/ai-agents">
+    Auto-summarize and tag collected content with Claude, OpenAI, DeepSeek, and more.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore the full REST API for programmatic control of all features.
+  </Card>
+</CardGroup>
 
-## Create beautiful pages
+## What you can build
 
-Everything you need to create world-class documentation.
+<Steps>
+  <Step title="Connect your data sources">
+    Add sources from any of five channel types: opencli (browser-based), RSS feeds, REST APIs, web scrapers, or generic CLI commands. Each source maps to a specific platform or endpoint.
+  </Step>
+  <Step title="Schedule automated collection">
+    Create cron-based schedules (every N minutes, hours, days, or weeks) with timezone support. Bind each schedule to a specific agent node or let the system auto-route.
+  </Step>
+  <Step title="Process with AI">
+    Configure an AI agent using Claude, OpenAI, DeepSeek, Kimi, GLM, or Ollama. After each collection run, the pipeline automatically summarizes and tags every new record.
+  </Step>
+  <Step title="Push to your team">
+    Send notifications to Feishu, DingTalk, WeCom, Email, or any Webhook endpoint. Trigger on new records, AI completion, or task failures.
+  </Step>
+</Steps>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+## Supported platforms
 
-## Need inspiration?
+| Category | Platforms |
+|----------|-----------|
+| Chinese social | Xiaohongshu, Bilibili, Zhihu, Weibo, V2EX, Snowball |
+| Chinese news/finance | Sina Finance 7×24, Ctrip, Boss Zhipin |
+| Global news | Hacker News, BBC, Reuters, Bloomberg, arXiv, Wikipedia |
+| Global social | Twitter/X, Reddit, YouTube, LinkedIn, Yahoo Finance, Barchart |
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Note>
+  Platforms requiring login (Xiaohongshu, Bilibili, Weibo, Twitter/X, LinkedIn, YouTube) need a one-time manual login via the browser. Public sources like Hacker News, BBC, and RSS feeds work without authentication.
+</Note>

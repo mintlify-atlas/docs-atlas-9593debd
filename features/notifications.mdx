@@ -1,0 +1,235 @@
+---
+title: "Notifications: Webhook, Email, and Messaging Alerts"
+description: "Configure notification rules that fire on new records, AI completion, or task failures — delivering messages to Webhook, Feishu, DingTalk, WeCom, or Email."
+---
+
+Notification rules let OpenCLI Admin push alerts to your team automatically. Each rule watches for a specific pipeline event — a new record ingested, AI processing completed, or a collection task failed — and sends a formatted message to the channel of your choice. Rules can be scoped to a specific data source or applied globally, and each supports a customizable message template with placeholders drawn from the record's normalized and AI-enriched fields.
+
+## Trigger events
+
+| Event | `trigger_event` value | When it fires |
+|-------|----------------------|---------------|
+| New record ingested | `on_new_record` | Each time a deduplicated record is written to the database after normalization |
+| AI processing complete | `on_ai_processed` | After an AI agent finishes enriching a record |
+| Task failed | `on_task_failed` | When a collection task exits with `status: failed` |
+
+<Note>
+  Rules with no `source_id` set apply to every data source. Set `source_id` to limit a rule to a specific source — for example, to send Feishu alerts only for Twitter/X records.
+</Note>
+
+## Supported channels
+
+<CardGroup cols={2}>
+  <Card title="Webhook" icon="webhook">
+    HTTP POST with a JSON body. Supports HMAC-SHA256 request signing via a shared secret. Use this to connect to any service with an HTTP endpoint — Zapier, n8n, custom backends, etc.
+  </Card>
+  <Card title="Feishu (Lark)" icon="message">
+    Custom bot webhook for Feishu and Lark. Sends a richly formatted `post`-type message. Supports optional HMAC signature verification (加签).
+  </Card>
+  <Card title="DingTalk" icon="bell">
+    Custom robot webhook for DingTalk. Sends a Markdown message with title and body. Supports HMAC timestamp-based signing for security.
+  </Card>
+  <Card title="WeCom (企业微信)" icon="building">
+    Group robot webhook for WeCom. Sends a Markdown message. No signature required — just paste the webhook URL from the group robot settings.
+  </Card>
+  <Card title="Email" icon="envelope">
+    SMTP email via aiosmtplib. Supports TLS on port 587. Configure the SMTP server, credentials, and recipient list either in the rule config or via environment variables.
+  </Card>
+</CardGroup>
+
+## Creating a notification rule
+
+<Steps>
+  <Step title="Open Notifications">
+    Navigate to **Notifications** in the sidebar. Rules and delivery logs are shown on separate tabs.
+  </Step>
+  <Step title="Click Add rule">
+    Click **Add rule**. A form opens.
+  </Step>
+  <Step title="Name the rule and choose a source">
+    Enter a name for the rule. Optionally select a **Data source** to scope the rule — leave it blank to match all sources.
+  </Step>
+  <Step title="Select a trigger event">
+    Choose `on_new_record`, `on_ai_processed`, or `on_task_failed`.
+  </Step>
+  <Step title="Select a notifier type">
+    Choose the delivery channel: `webhook`, `feishu`, `dingtalk`, `wecom`, or `email`.
+  </Step>
+  <Step title="Fill in notifier configuration">
+    Provide the channel-specific fields (see the configuration reference below). Message templates support `{{title}}`, `{{url}}`, `{{source_id}}`, `{{summary}}`, and any other key present in the record's `normalized_data` or `ai_enrichment`.
+  </Step>
+  <Step title="Save">
+    Click **Save**. The rule is active immediately. The next matching pipeline event will trigger a delivery attempt.
+  </Step>
+</Steps>
+
+## Notifier configuration reference
+
+<Tabs>
+  <Tab title="Webhook">
+    The webhook notifier sends an HTTP POST with a JSON body to the configured URL. The body includes the event name, source ID, record ID, normalized data, AI enrichment, and a Unix timestamp.
+
+    | Field | Required | Description |
+    |-------|----------|-------------|
+    | `url` | Yes | Full HTTP(S) URL to POST to |
+    | `secret` | No | Shared secret for HMAC-SHA256 signing. When set, the request includes an `X-Signature-256: sha256=<hex>` header |
+    | `headers` | No | Extra HTTP headers as a key-value object |
+    | `timeout` | No | Request timeout in seconds. Defaults to 15 |
+
+    ```json
+    {
+      "url": "https://hooks.example.com/incoming/abc123",
+      "secret": "my-webhook-secret",
+      "headers": { "X-Custom-Header": "value" }
+    }
+    ```
+
+    Example payload delivered to your endpoint:
+
+    ```json
+    {
+      "event": "on_new_record",
+      "source_id": "src_01abc",
+      "record_id": "rec_09xyz",
+      "data": {
+        "title": "Hacker News top story",
+        "url": "https://example.com/story"
+      },
+      "ai_enrichment": {
+        "summary": "A brief summary.",
+        "tags": ["technology"]
+      },
+      "timestamp": 1713571200
+    }
+    ```
+
+    <Tip>
+      Verify the `X-Signature-256` header on your server to ensure the request genuinely comes from OpenCLI Admin. Compute `HMAC-SHA256(secret, body_bytes)` and compare the hex digest.
+    </Tip>
+  </Tab>
+  <Tab title="Feishu">
+    Sends a `post`-type message to a Feishu custom bot webhook.
+
+    | Field | Required | Description |
+    |-------|----------|-------------|
+    | `webhook_url` | Yes | Feishu custom bot webhook URL |
+    | `secret` | No | Signing secret (加签). When set, adds `timestamp` and `sign` to the request body |
+    | `title` | No | Message title template. Defaults to `【新采集】{{title}}` |
+    | `content` | No | Message body template. Supports `{{field}}` placeholders |
+    | `timeout` | No | Request timeout in seconds. Defaults to 15 |
+
+    ```json
+    {
+      "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx",
+      "secret": "your-signing-secret",
+      "title": "New: {{title}}",
+      "content": "**Source**: {{source_id}}\n**Link**: {{url}}\n**Summary**: {{summary}}"
+    }
+    ```
+  </Tab>
+  <Tab title="DingTalk">
+    Sends a Markdown message to a DingTalk custom robot webhook.
+
+    | Field | Required | Description |
+    |-------|----------|-------------|
+    | `webhook_url` | Yes | DingTalk robot webhook URL |
+    | `secret` | No | Signing secret. When set, a `timestamp` + `sign` query string is appended to the URL |
+    | `title` | No | Markdown card title template |
+    | `content` | No | Markdown body template |
+    | `timeout` | No | Request timeout in seconds. Defaults to 15 |
+
+    ```json
+    {
+      "webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=xxxxx",
+      "secret": "your-signing-secret",
+      "title": "New record: {{title}}",
+      "content": "**Source**: {{source_id}}\n{{title}}\n[Read more]({{url}})"
+    }
+    ```
+  </Tab>
+  <Tab title="WeCom">
+    Sends a Markdown message to a WeCom group robot webhook.
+
+    | Field | Required | Description |
+    |-------|----------|-------------|
+    | `webhook_url` | Yes | WeCom group robot webhook URL |
+    | `content` | No | Markdown content template |
+    | `timeout` | No | Request timeout in seconds. Defaults to 15 |
+
+    ```json
+    {
+      "webhook_url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxx",
+      "content": "**{{title}}**\nSource: {{source_id}}\n[Link]({{url}})"
+    }
+    ```
+  </Tab>
+  <Tab title="Email">
+    Sends an email via SMTP with STARTTLS. Credentials can be supplied in the rule config or via environment variables.
+
+    | Field | Required | Description |
+    |-------|----------|-------------|
+    | `smtp_host` | Yes* | SMTP server hostname. Falls back to `SMTP_HOST` env var |
+    | `smtp_port` | No | SMTP port. Defaults to `587` (STARTTLS). Falls back to `SMTP_PORT` |
+    | `smtp_user` | Yes* | SMTP username. Falls back to `SMTP_USER` env var |
+    | `smtp_password` | Yes* | SMTP password. Falls back to `SMTP_PASSWORD` env var |
+    | `from` | No | Sender address. Falls back to `SMTP_FROM` or `smtp_user` |
+    | `to` | Yes | Array of recipient email addresses |
+    | `subject` | No | Subject line template. Defaults to `New record: {{title}}` |
+    | `body` | No | Plain-text body template |
+
+    \* Can be omitted if the corresponding environment variable is set.
+
+    ```json
+    {
+      "smtp_host": "smtp.gmail.com",
+      "smtp_port": 587,
+      "smtp_user": "sender@example.com",
+      "smtp_password": "app-password",
+      "to": ["team@example.com"],
+      "subject": "New record: {{title}}",
+      "body": "Source: {{source_id}}\nTitle: {{title}}\nLink: {{url}}\n\nSummary: {{summary}}"
+    }
+    ```
+
+    <Note>
+      The email notifier requires the `aiosmtplib` package. It is included in the default Docker images.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Message templates
+
+All channel types support `{{field}}` placeholders in their title, content, subject, and body fields. The placeholder context is built from:
+
+- `source_id` — the data source ID
+- All keys in the record's `normalized_data` (e.g. `title`, `url`, `content`, `author`, `published_at`)
+- All keys in the record's `ai_enrichment` (e.g. `summary`, `tags`)
+
+If a placeholder key is not found in the data, it renders as an empty string.
+
+## Delivery logs
+
+Every notification attempt is recorded in the `notification_logs` table, visible on the **Notifications → Logs** tab. Each log entry shows:
+
+- **Rule** — which rule triggered the attempt
+- **Record** — the associated record ID (if applicable)
+- **Status** — `sent` or `failed`
+- **Response data** — the raw response from the delivery endpoint
+- **Error message** — details if the attempt failed
+
+Use these logs to debug misconfigured webhooks, expired tokens, or unreachable SMTP servers.
+
+<AccordionGroup>
+  <Accordion title="A rule fires but I receive nothing">
+    Check the delivery logs for a `failed` entry. Common causes: the webhook URL is unreachable, an SMTP credential is wrong, or a Feishu/DingTalk signing secret does not match. Use a tool like `curl` to test the endpoint manually.
+  </Accordion>
+  <Accordion title="I want to test a rule without waiting for new data">
+    Manually trigger a collection task on a source covered by the rule. If data is collected, the `on_new_record` event will fire.
+  </Accordion>
+  <Accordion title="How do I scope a rule to one source?">
+    Set the `source_id` field when creating the rule. Leave it blank to match records from all sources.
+  </Accordion>
+  <Accordion title="Can I send to multiple Feishu bots?">
+    Yes — create one rule per bot, each with its own `webhook_url`. There is no limit on the number of notification rules.
+  </Accordion>
+</AccordionGroup>

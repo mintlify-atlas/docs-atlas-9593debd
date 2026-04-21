@@ -1,0 +1,254 @@
+---
+title: "Nodes API: Register and Manage Remote Edge Agent Nodes"
+description: "Register, list, inspect, and remove edge agent nodes. Covers HTTP registration, WebSocket reverse channel, install script download, and per-node stats."
+---
+
+Edge nodes are remote agent processes that the center dispatches collection tasks to. A node can register via two protocols: HTTP mode (center calls the agent directly over a LAN) or WebSocket mode (agent opens a persistent reverse tunnel, suitable for NAT traversal). The Nodes API manages the registry of these agents, their online/offline lifecycle events, and task execution statistics.
+
+## Node field reference
+
+| Field | Values | Description |
+|-------|--------|-------------|
+| `protocol` | `http`, `ws` | How the center communicates with the agent. |
+| `mode` | `bridge`, `cdp` | Chrome connection mode during collection. |
+| `node_type` | `docker`, `shell` | How the agent process was deployed. |
+| `status` | `online`, `offline` | Current availability. WS-connected nodes are always `online`. |
+
+---
+
+## List nodes
+
+`GET /api/v1/nodes`
+
+Returns all registered edge nodes. The `status` field for WebSocket-connected nodes is overlaid with `online` in real time regardless of the stored database value.
+
+### Response
+
+<ResponseField name="data" type="EdgeNodeRead[]">
+  Array of node objects.
+  <Expandable title="EdgeNodeRead properties">
+    <ResponseField name="id" type="string">Unique node ID (UUID).</ResponseField>
+    <ResponseField name="url" type="string">Canonical URL used to identify and reach the agent (e.g., `http://192.168.1.100:19823`).</ResponseField>
+    <ResponseField name="label" type="string">Human-readable label, defaults to the URL.</ResponseField>
+    <ResponseField name="protocol" type="string">Registration protocol: `http` or `ws`.</ResponseField>
+    <ResponseField name="mode" type="string">Chrome connection mode: `bridge` or `cdp`.</ResponseField>
+    <ResponseField name="node_type" type="string">Deployment type: `docker` or `shell`.</ResponseField>
+    <ResponseField name="status" type="string">Current status: `online` or `offline`.</ResponseField>
+    <ResponseField name="last_seen_at" type="string">ISO 8601 UTC timestamp of the last registration or heartbeat.</ResponseField>
+    <ResponseField name="ip" type="string">Detected outbound IP of the agent at last registration.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+    <ResponseField name="updated_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl http://localhost:8031/api/v1/nodes
+```
+
+---
+
+## Register node (HTTP mode)
+
+`POST /api/v1/nodes/register`
+
+Called by an agent to register itself with the center using HTTP mode. This operation is idempotent: calling it again updates the existing node's `mode`, `label`, and `last_seen_at` and records a new `registered` lifecycle event.
+
+### Request body
+
+<ParamField body="agent_url" type="string" required>
+  The HTTP or HTTPS URL at which the center can reach the agent (e.g., `http://192.168.1.100:19823`). Must start with `http`.
+</ParamField>
+
+<ParamField body="mode" type="string" default="bridge">
+  Chrome connection mode. One of `bridge` or `cdp`.
+</ParamField>
+
+<ParamField body="node_type" type="string" default="docker">
+  Deployment type. One of `docker` or `shell`.
+</ParamField>
+
+<ParamField body="label" type="string">
+  Optional human-readable label. Defaults to the `agent_url` if not provided.
+</ParamField>
+
+<ParamField body="agent_protocol" type="string" default="http">
+  Communication protocol. One of `http` or `ws`.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="EdgeNodeRead">
+  The upserted node object.
+</ResponseField>
+
+```bash
+curl -X POST http://localhost:8031/api/v1/nodes/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_url": "http://192.168.1.100:19823",
+    "mode": "cdp",
+    "node_type": "docker",
+    "label": "edge-node-lan-1"
+  }'
+```
+
+---
+
+## Get node statistics
+
+`GET /api/v1/nodes/{node_id}/stats`
+
+Returns task run counts and success metrics for a specific node over a given time range.
+
+### Path parameters
+
+<ParamField path="node_id" type="string" required>
+  Node UUID.
+</ParamField>
+
+### Query parameters
+
+<ParamField query="range" type="string" default="7d">
+  Time range preset. One of `all`, `today`, `yesterday`, `7d`, `30d`, or `custom`.
+</ParamField>
+
+<ParamField query="start" type="string">
+  Custom range start datetime (ISO 8601, UTC). Required when `range=custom`.
+</ParamField>
+
+<ParamField query="end" type="string">
+  Custom range end datetime (ISO 8601, UTC). Required when `range=custom`.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="object">
+  <Expandable title="properties">
+    <ResponseField name="total" type="integer">Total task runs dispatched to this node.</ResponseField>
+    <ResponseField name="success" type="integer">Number of completed runs.</ResponseField>
+    <ResponseField name="failed" type="integer">Number of failed runs.</ResponseField>
+    <ResponseField name="success_rate" type="number">Success percentage (0–100), rounded to one decimal place.</ResponseField>
+    <ResponseField name="records_collected" type="integer">Total records collected across all runs.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl "http://localhost:8031/api/v1/nodes/node_stu901/stats?range=7d"
+```
+
+---
+
+## List node events
+
+`GET /api/v1/nodes/{node_id}/events`
+
+Returns the last 100 lifecycle events for a node in reverse chronological order. Event types are `registered`, `online`, and `offline`.
+
+### Path parameters
+
+<ParamField path="node_id" type="string" required>
+  Node UUID.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="EdgeNodeEventRead[]">
+  Array of up to 100 event objects.
+  <Expandable title="EdgeNodeEventRead properties">
+    <ResponseField name="id" type="string">Event ID.</ResponseField>
+    <ResponseField name="node_id" type="string">Parent node ID.</ResponseField>
+    <ResponseField name="event" type="string">Event type: `registered`, `online`, or `offline`.</ResponseField>
+    <ResponseField name="ip" type="string">Agent outbound IP at event time.</ResponseField>
+    <ResponseField name="event_meta" type="object">Metadata such as `mode`, `node_type`, and `protocol`.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl http://localhost:8031/api/v1/nodes/node_stu901/events
+```
+
+---
+
+## Delete node
+
+`DELETE /api/v1/nodes/{node_id}`
+
+Removes a node from the database and from the in-memory browser pool. Does not affect task run history.
+
+### Path parameters
+
+<ParamField path="node_id" type="string" required>
+  Node UUID.
+</ParamField>
+
+```bash
+curl -X DELETE http://localhost:8031/api/v1/nodes/node_stu901
+```
+
+---
+
+## Download install script
+
+`GET /api/v1/nodes/install/agent.sh`
+
+Returns a Bash install script with the `CENTRAL_API_URL` pre-filled to the server's public URL. The script supports Docker and Python (shell) installation modes.
+
+The URL is resolved from the `PUBLIC_URL` environment variable, falling back to reverse-proxy headers (`X-Forwarded-Host`, `X-Forwarded-Proto`), and finally to the request's `Host` header.
+
+```bash
+# Download and inspect the script
+curl http://localhost:8031/api/v1/nodes/install/agent.sh
+
+# Pipe directly to bash for Docker installation (WS mode)
+curl -fsSL http://localhost:8031/api/v1/nodes/install/agent.sh | bash
+
+# Shell (Python) installation
+curl -fsSL http://localhost:8031/api/v1/nodes/install/agent.sh | \
+  AGENT_REGISTER=ws bash -s -- python
+```
+
+---
+
+## WebSocket reverse channel
+
+`WS /api/v1/nodes/ws`
+
+Agents that cannot be reached directly (NAT, firewall) connect to this WebSocket endpoint to establish a persistent reverse tunnel. The center sends `collect` commands over the tunnel and the agent replies with `result` messages.
+
+### Handshake
+
+After connecting, the agent must immediately send a JSON `register` message:
+
+```json
+{
+  "type": "register",
+  "agent_url": "http://192.168.1.100:19823",
+  "mode": "cdp",
+  "node_type": "docker",
+  "label": "edge-node-nat-1"
+}
+```
+
+The center replies with:
+
+```json
+{
+  "type": "registered",
+  "agent_url": "http://192.168.1.100:19823"
+}
+```
+
+### Message types
+
+| Direction | Type | Description |
+|-----------|------|-------------|
+| Agent → Center | `register` | Initial handshake (required). |
+| Center → Agent | `registered` | Acknowledgement of successful registration. |
+| Agent → Center | `result` | Result of a dispatched collect task. Must include `request_id`. |
+| Agent → Center | `ping` | Keepalive ping. Center replies with `pong`. |
+| Center → Agent | `pong` | Response to ping. |
+
+<Note>
+When the WebSocket connection closes, the node is automatically marked `offline` in the database and removed from the in-memory pool.
+</Note>

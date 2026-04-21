@@ -1,0 +1,218 @@
+---
+title: "Tasks API: Trigger, Inspect, and Trace Collection Tasks"
+description: "List, inspect, and manually trigger collection tasks; retrieve per-run execution history and structured step-level pipeline event traces for debugging."
+---
+
+A collection task is created each time a data source is executed — whether by a cron schedule, a webhook, or a manual trigger. Each task tracks its overall status and spawns one or more task runs, each of which records timing, records collected, and a structured event log for step-by-step trace visibility.
+
+## Task status values
+
+| Status | Meaning |
+|--------|---------|
+| `pending` | Task has been created but execution has not started. |
+| `running` | Task is currently executing. |
+| `completed` | Task finished successfully. |
+| `failed` | Task encountered an error and did not complete. |
+| `cancelled` | Task was cancelled before completion. |
+
+## Task run status values
+
+| Status | Meaning |
+|--------|---------|
+| `running` | The run is in progress. |
+| `completed` | The run finished successfully. |
+| `failed` | The run encountered an unrecoverable error. |
+
+---
+
+## List tasks
+
+`GET /api/v1/tasks`
+
+Returns a paginated list of collection tasks. The response includes the source name resolved from the source ID.
+
+### Query parameters
+
+<ParamField query="source_id" type="string">
+  Filter tasks belonging to a specific source.
+</ParamField>
+
+<ParamField query="status" type="string">
+  Filter by task status. One of `pending`, `running`, `completed`, `failed`, `cancelled`.
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number. Must be ≥ 1.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="20">
+  Items per page. Accepts 1–100.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="CollectionTaskRead[]">
+  Array of task objects.
+  <Expandable title="CollectionTaskRead properties">
+    <ResponseField name="id" type="string">Unique task ID (UUID).</ResponseField>
+    <ResponseField name="source_id" type="string">ID of the data source that was collected.</ResponseField>
+    <ResponseField name="source_name" type="string">Resolved display name of the source.</ResponseField>
+    <ResponseField name="agent_id" type="string">Optional AI agent ID used for this task.</ResponseField>
+    <ResponseField name="trigger_type" type="string">How the task was triggered: `manual`, `scheduled`, or `webhook`.</ResponseField>
+    <ResponseField name="parameters" type="object">Parameters passed to the collection run.</ResponseField>
+    <ResponseField name="priority" type="integer">Priority value from 1 (lowest) to 10 (highest).</ResponseField>
+    <ResponseField name="status" type="string">Current status of the task.</ResponseField>
+    <ResponseField name="error_message" type="string">Error description if the task failed. `null` otherwise.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+    <ResponseField name="updated_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl "http://localhost:8031/api/v1/tasks?status=failed&page=1&limit=20"
+```
+
+---
+
+## Trigger task
+
+`POST /api/v1/tasks/trigger`
+
+Manually creates and dispatches a collection task for a source. Returns `202 Accepted` when the task has been accepted for execution. The source must exist and be enabled.
+
+### Request body
+
+<ParamField body="source_id" type="string" required>
+  ID of the source to collect from.
+</ParamField>
+
+<ParamField body="parameters" type="object">
+  Optional key-value parameters forwarded to the collection run. Defaults to `{}`.
+</ParamField>
+
+<ParamField body="priority" type="integer" default="5">
+  Task priority from 1 (lowest) to 10 (highest).
+</ParamField>
+
+<ParamField body="agent_id" type="string">
+  Optional: override the agent node used for this run only. Overrides schedule binding and site-level routing.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="object">
+  Dispatch result returned by the executor.
+</ResponseField>
+
+```bash
+curl -X POST http://localhost:8031/api/v1/tasks/trigger \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_id": "src_abc123",
+    "priority": 8,
+    "parameters": {}
+  }'
+```
+
+---
+
+## Get task
+
+`GET /api/v1/tasks/{task_id}`
+
+Retrieves a single collection task by ID.
+
+### Path parameters
+
+<ParamField path="task_id" type="string" required>
+  Task UUID.
+</ParamField>
+
+```bash
+curl http://localhost:8031/api/v1/tasks/task_def456
+```
+
+---
+
+## List task runs
+
+`GET /api/v1/tasks/{task_id}/runs`
+
+Returns a paginated list of all execution runs for a task, ordered by creation time descending.
+
+### Path parameters
+
+<ParamField path="task_id" type="string" required>
+  Task UUID.
+</ParamField>
+
+### Query parameters
+
+<ParamField query="page" type="integer" default="1">
+  Page number. Must be ≥ 1.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="20">
+  Items per page. Accepts 1–100.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="TaskRunRead[]">
+  Array of run objects.
+  <Expandable title="TaskRunRead properties">
+    <ResponseField name="id" type="string">Unique run ID (UUID).</ResponseField>
+    <ResponseField name="task_id" type="string">ID of the parent task.</ResponseField>
+    <ResponseField name="status" type="string">Run status: `running`, `completed`, or `failed`.</ResponseField>
+    <ResponseField name="worker_id" type="string">Worker identifier (Celery mode). `null` in local mode.</ResponseField>
+    <ResponseField name="celery_task_id" type="string">Celery task ID. `null` in local mode.</ResponseField>
+    <ResponseField name="started_at" type="string">ISO 8601 UTC timestamp when the run started.</ResponseField>
+    <ResponseField name="finished_at" type="string">ISO 8601 UTC timestamp when the run ended.</ResponseField>
+    <ResponseField name="duration_ms" type="integer">Elapsed time in milliseconds.</ResponseField>
+    <ResponseField name="records_collected" type="integer">Number of records stored during this run.</ResponseField>
+    <ResponseField name="error_message" type="string">Error description if the run failed. `null` otherwise.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl "http://localhost:8031/api/v1/tasks/task_def456/runs?page=1&limit=10"
+```
+
+---
+
+## List run events
+
+`GET /api/v1/tasks/{task_id}/runs/{run_id}/events`
+
+Returns the ordered list of structured execution trace events for a single run. Events cover every pipeline step from trigger through collection, normalization, AI processing, and notification.
+
+### Path parameters
+
+<ParamField path="task_id" type="string" required>
+  Task UUID.
+</ParamField>
+
+<ParamField path="run_id" type="string" required>
+  Run UUID.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="object[]">
+  Array of event objects ordered by `created_at` ascending.
+  <Expandable title="event properties">
+    <ResponseField name="id" type="string">Event ID.</ResponseField>
+    <ResponseField name="run_id" type="string">Parent run ID.</ResponseField>
+    <ResponseField name="level" type="string">Log level: `info`, `warning`, or `error`.</ResponseField>
+    <ResponseField name="step" type="string">Pipeline step: `trigger`, `collect`, `normalize`, `store`, `ai_process`, `notify`, `complete`, or `failed`.</ResponseField>
+    <ResponseField name="message" type="string">Human-readable description of the event.</ResponseField>
+    <ResponseField name="detail" type="object">Structured detail payload. `null` if not applicable.</ResponseField>
+    <ResponseField name="elapsed_ms" type="integer">Milliseconds elapsed since run start. `null` if not recorded.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 UTC timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl http://localhost:8031/api/v1/tasks/task_def456/runs/run_ghi789/events
+```

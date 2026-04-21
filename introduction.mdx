@@ -1,0 +1,122 @@
+---
+title: "OpenCLI Admin: Multi-Channel Data Collection Platform"
+description: "Visual admin for multi-channel data collection across 20+ platforms: schedule jobs, route to distributed agents, process with AI, and push notifications."
+---
+
+OpenCLI Admin is a self-hosted data collection management system that lets you visually configure scrapers, schedule jobs, and manage distributed agent nodes — all without writing code. It wraps the [opencli](https://github.com/jackwener/opencli) browser automation engine and adds a full web interface, a pipeline from collection through AI analysis to push notifications, and support for clustering multiple machines into a single coordinated fleet.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Dashboard & records" icon="chart-line">
+    7-day trend charts, collection volume histograms, today/yesterday comparison, and a full-text searchable record store with inline JSON viewer and AI analysis.
+  </Card>
+  <Card title="5 collection channels" icon="plug">
+    opencli (browser automation), RSS, REST API, web scraper (httpx + BeautifulSoup), and generic CLI — each configurable from the UI.
+  </Card>
+  <Card title="Scheduled plans" icon="clock">
+    Structured cron builder (every N minutes/hours/days/weeks/months) with timezone support, one-shot execution, and per-plan agent binding.
+  </Card>
+  <Card title="AI post-processing" icon="sparkles">
+    Automatic summarization, tagging, and analysis after collection. Supports Claude, OpenAI, DeepSeek, Kimi, GLM, MiniMax, and Ollama.
+  </Card>
+  <Card title="Distributed agents" icon="server">
+    Register any remote machine as a collection node. Agents connect via WebSocket reverse channel (NAT-friendly) or direct HTTP, with automatic site-based routing.
+  </Card>
+  <Card title="Notification push" icon="bell">
+    Trigger on new record, AI completion, or task failure. Deliver to Webhook, Feishu, DingTalk, WeCom, or Email.
+  </Card>
+</CardGroup>
+
+## Architecture
+
+OpenCLI Admin is composed of four main layers that work together to move data from source platforms into your database.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                       Frontend (React)                        │
+│   Dashboard · Sources · Tasks · Records · Plans · Nodes      │
+└──────────────────────────┬───────────────────────────────────┘
+                           │ REST API
+┌──────────────────────────▼───────────────────────────────────┐
+│                   Backend API (FastAPI)                        │
+│                                                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐  │
+│  │Scheduler │  │ Pipeline │  │ AI agent │  │ Notifier    │  │
+│  │cron/hook │  │ collect  │  │ Claude / │  │ Webhook /   │  │
+│  │          │  │ →store   │  │ OpenAI…  │  │ Feishu…     │  │
+│  └──────────┘  └────┬─────┘  └──────────┘  └─────────────┘  │
+│                     │                                         │
+│  ┌────────────────────────────────────────────────────────┐   │
+│  │              Channels (plugins)                         │   │
+│  │  opencli · RSS · REST API · Web scraper · CLI          │   │
+│  └────────────────────────────────────────────────────────┘   │
+└──────┬──────────────────┬──────────────────────────────┬──────┘
+       │ CDP / Bridge      │ WS reverse / HTTP direct     │ DB
+       ▼                   ▼                              ▼
+ Built-in agent      Remote edge nodes             SQLite /
+ (Docker)            (Docker / Shell)              PostgreSQL
+```
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 18 + TypeScript + Vite + Tailwind CSS |
+| Backend | FastAPI + SQLAlchemy 2.0 (async) |
+| Database | SQLite (default) / PostgreSQL |
+| Task queue | asyncio (single node) / Celery + Redis (distributed) |
+| Agent | Chromium + noVNC + opencli (Bridge/CDP, WS/HTTP dual registration) |
+| Deployment | Native shell / Docker Compose |
+
+## Supported platforms
+
+OpenCLI Admin collects from 20+ platforms across three tiers via the opencli channel.
+
+| Region | Platforms |
+|--------|-----------|
+| China domestic | Xiaohongshu, Bilibili, Zhihu, Weibo, V2EX, Xueqiu, SMZDM, Boss Zhipin, Ctrip, Xiaoyuzhou, Sina Finance 7x24 |
+| Public (no login) | Hacker News, BBC, Reuters, Bloomberg, arXiv, Wikipedia |
+| Global | Twitter/X, Reddit, YouTube, LinkedIn, Yahoo Finance, Barchart |
+
+<Note>
+Platforms that require login (Xiaohongshu, Bilibili, Twitter/X, LinkedIn, YouTube, etc.) need a one-time manual login via the browser session managed by the agent. Public sources like Hacker News and RSS feeds work immediately without any credentials.
+</Note>
+
+## Typical use cases
+
+### Multi-machine collection cluster
+
+Run several machines, each logged into different accounts, coordinated by a single OpenCLI Admin center:
+
+```
+Mac Mini A (center)          Mac Mini B               Mac Mini C
+┌──────────────────┐  WS    ┌─────────────────┐  WS  ┌─────────────────┐
+│ opencli-admin    │◄───────│ opencli-agent   │      │ opencli-agent   │
+│ Dashboard :8030  │◄───────│ Bilibili/XHS    │      │ Twitter/X       │
+│ API :8031        │        │ Domestic        │      │ Global          │
+└──────────────────┘        └─────────────────┘      └─────────────────┘
+```
+
+Agents connect back to the center through a WebSocket reverse channel, traversing NAT without opening inbound ports. The Nodes page lets you bind specific agents to specific platforms so tasks are automatically routed.
+
+### Cloud server + local Mac hybrid
+
+Keep login cookies on a local Mac while the cloud handles high-volume public data:
+
+```
+Local Mac (home network)              Cloud server (public IP)
+┌──────────────────┐                 ┌──────────────────────────┐
+│ opencli-agent    │──── WS ────────►│ opencli-admin (center)   │
+│ Weibo / Zhihu    │                 │                          │
+│ XHS / Bilibili   │                 │  Built-in Agent          │
+└──────────────────┘                 │  HackerNews / RSS / BBC  │
+                                     └──────────────────────────┘
+```
+
+### Scheduled collection + AI summary + push workflow
+
+1. **Sources** — add Zhihu hot list, Hacker News, Twitter lists
+2. **Schedule** — run every hour, bound to the appropriate agent
+3. **AI agent** — DeepSeek extracts summaries and applies tags after collection
+4. **Notifications** — push to Feishu or WeCom when AI processing completes
+
+No code required — everything is configured in the web interface.

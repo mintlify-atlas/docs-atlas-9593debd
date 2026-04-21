@@ -1,0 +1,124 @@
+---
+title: "Bridge vs CDP: Choosing the Right Chrome Connection"
+description: "Compare Bridge and CDP connection modes for opencli, understand when each is required, how to switch between them, and which Docker image variant to use."
+---
+
+Every collection node—whether local or a remote agent—connects to a Chrome instance to scrape content. OpenCLI Admin supports two connection modes that differ in how opencli communicates with the browser. Choosing the right mode depends on whether the target platform requires an authenticated login session.
+
+## The two modes
+
+<CardGroup cols={2}>
+  <Card title="Bridge mode" icon="plug">
+    Uses opencli together with a background `daemon.js` process and the **Browser Bridge** Chrome extension. The extension proxies browser automation commands through a local daemon, which gives opencli access to the full authenticated browser context—including cookies, local storage, and page state held by the extension.
+  </Card>
+  <Card title="CDP mode" icon="terminal">
+    Connects directly to Chrome via the **Chrome DevTools Protocol** remote debugging interface. No extension is required. opencli sends CDP commands to the port Chrome exposes at startup (default `9222`).
+  </Card>
+</CardGroup>
+
+### Comparison
+
+| | Bridge mode | CDP mode |
+|---|---|---|
+| Requires Browser Bridge extension | Yes | No |
+| Supports login-required platforms | Yes | Limited |
+| Setup complexity | Higher | Lower |
+| Overhead | Moderate (daemon + extension) | Minimal |
+| Best for | Bilibili, Xiaohongshu, Weibo, Zhihu, Twitter/X, LinkedIn | Hacker News, BBC, Reuters, RSS, public APIs |
+
+<Warning>
+Login-required platforms such as Bilibili, Xiaohongshu, Weibo, Zhihu, Twitter/X, and LinkedIn require Bridge mode. CDP mode can open these pages but cannot access content that is only visible after authentication.
+</Warning>
+
+## How to switch modes
+
+### Local mode (Chrome endpoint cards)
+
+In **Node Management** with local mode active, each Chrome endpoint appears as a card. A toggle on the card switches between Bridge and CDP for that endpoint.
+
+### Agent mode (Add Node wizard)
+
+When registering a new agent through the **Add Node** wizard (the `InstallWizardModal`), a step asks you to choose the Chrome connection mode. This sets the `AGENT_MODE` environment variable in the generated install command.
+
+### Environment variable
+
+You can set or change the mode directly on any agent by setting `AGENT_MODE`:
+
+```bash
+# Bridge mode
+AGENT_MODE=bridge
+
+# CDP mode
+AGENT_MODE=cdp
+```
+
+Pass it as a Docker flag or add it to the systemd service unit environment block. The agent reports its mode to the center on registration, and the center stores it on the node record.
+
+## Docker image variants
+
+Two agent image variants are published to Docker Hub:
+
+<Tabs>
+  <Tab title="Standard (~100 MB)">
+    The default image does not bundle a browser. It expects Chrome to run on the host machine and connects to it via `host.docker.internal`.
+
+    ```bash
+    xjh1994/opencli-admin-agent:0.3.6
+    ```
+
+    You must start Chrome on the host with remote debugging enabled before running this image:
+
+    ```bash
+    # macOS
+    /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+      --remote-debugging-port=9222 \
+      --remote-debugging-address=0.0.0.0 \
+      --no-first-run --no-default-browser-check &
+    ```
+
+    The container remaps `localhost` to `host.docker.internal` automatically when `AGENT_HAS_CHROME` is not set.
+  </Tab>
+  <Tab title="Chrome-embedded (~450 MB)">
+    The `-chrome` variant bundles Chromium inside the container. No host Chrome instance is needed.
+
+    ```bash
+    xjh1994/opencli-admin-agent:0.3.6-chrome
+    ```
+
+    Use the `--install-chrome` flag with the one-click install script to select this variant:
+
+    ```bash
+    curl -fsSL http://<center>:8030/api/v1/nodes/install/agent.sh | bash -s -- docker --install-chrome
+    ```
+
+    Or set `INSTALL_CHROME=true` and `CHROME_SUFFIX=-chrome` in `.env` before running `docker compose up`.
+  </Tab>
+</Tabs>
+
+## Logging into platforms via noVNC
+
+For login-required platforms, you need to sign in to each account inside the Chrome instance that the agent uses. The Docker agent image exposes a noVNC server that gives you browser-in-browser access to that Chrome instance.
+
+| Deployment | noVNC URL |
+|---|---|
+| Docker Compose agent-1 | `http://localhost:3010` |
+| Docker Compose agent-2 | `http://localhost:3011` |
+| Docker Compose agent-3 | `http://localhost:3012` |
+
+The `NOVNC_BASE_PORT` environment variable in `.env` controls the base port; each additional agent increments it by one.
+
+<Steps>
+  <Step title="Open the noVNC URL">
+    Navigate to `http://<agent-host>:3010` in your browser to open the graphical Chrome session running inside the container.
+  </Step>
+  <Step title="Log into the target platform">
+    Use the Chrome window to sign in to Bilibili, Xiaohongshu, Weibo, or any other login-required platform. The session is persisted in the container's Chrome profile directory.
+  </Step>
+  <Step title="Verify collection works">
+    Trigger a manual collection task for that platform in the OpenCLI Admin UI and confirm it returns data.
+  </Step>
+</Steps>
+
+<Note>
+For the native Shell deployment (non-Docker), login sessions are stored in `~/.opencli-admin/chrome-profile/` on the host machine and persist across restarts automatically.
+</Note>

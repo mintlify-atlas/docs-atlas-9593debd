@@ -1,0 +1,90 @@
+---
+title: "Distributed Nodes: Edge Collection Architecture Overview"
+description: "Learn how OpenCLI Admin extends collection capacity across remote machines, enabling NAT traversal, multi-account isolation, and geographic distribution."
+---
+
+OpenCLI Admin can distribute collection work across any number of remote machines by running `opencli-agent` on each node and connecting them back to the central server. Each agent handles its own Chrome session and opencli subprocess, so accounts stay isolated per machine while the central server coordinates scheduling, routing, and result storage.
+
+## Two deployment modes
+
+The Node Management page exposes two top-level collection modes, switchable from the mode card at the top of the page.
+
+<CardGroup cols={2}>
+  <Card title="Local mode" icon="monitor">
+    The center API directly drives one or more Chrome instances running on the same machine or Docker network. Chrome endpoints appear as individual cards; each card shows the CDP URL and lets you toggle Bridge vs CDP connection mode.
+  </Card>
+  <Card title="Agent mode" icon="server">
+    Collection is delegated to remote edge nodes. The center dispatches tasks over a WebSocket reverse tunnel or via direct HTTP, depending on how each agent registered. Nodes appear in a list with online status, label, registration time, and site bindings.
+  </Card>
+</CardGroup>
+
+## Typical architectures
+
+### Multi-machine cluster
+
+Several machines—each logged into different platform accounts—connect back to a single central server. The center schedules tasks and routes them by site binding so each platform always lands on the correct logged-in browser.
+
+```
+Mac Mini A (center)          Mac Mini B                 Mac Mini C
+┌──────────────────┐  WS     ┌─────────────────┐  WS   ┌─────────────────┐
+│ opencli-admin    │◄────────│ opencli-agent   │       │ opencli-agent   │
+│ UI :8030         │◄────────│ Bilibili / XHS  │       │ Twitter / X     │
+│ API :8031        │         │ domestic sites  │       │ global sites    │
+└──────────────────┘         └─────────────────┘       └─────────────────┘
+```
+
+Nodes B and C register via WebSocket reverse tunnel, punching through NAT without opening inbound ports.
+
+### Cloud server + local Mac hybrid
+
+A cloud server handles high-volume public data while a local Mac holds authenticated cookies for login-required platforms. The local agent initiates a WebSocket connection outbound to the cloud center, so no inbound firewall rules are needed.
+
+```
+Local Mac (home network)              Cloud server (public)
+┌──────────────────┐                 ┌──────────────────────────────┐
+│ opencli-agent    │──── WS ────────►│ opencli-admin (center)       │
+│ Weibo / Zhihu    │                 │                              │
+│ XHS / Bilibili   │                 │  Built-in agent              │
+└──────────────────┘                 │  HackerNews / RSS / BBC      │
+                                     └──────────────────────────────┘
+```
+
+Sensitive session cookies never leave the local machine.
+
+### Single-machine all-in-one
+
+The simplest deployment starts the center and one agent together via Docker Compose. Additional agents can be added later through the Node Management UI.
+
+```bash
+docker compose up -d
+```
+
+Multiple agents on the same host each get an independent Chrome profile, enabling parallel collection under different accounts on the same platform.
+
+## What the Node Management UI shows
+
+<CardGroup cols={2}>
+  <Card title="Online status" icon="circle-check">
+    WS-connected nodes report as online in real time. The last-seen timestamp is updated on every registration event.
+  </Card>
+  <Card title="Registration timeline" icon="clock">
+    Each node's event log records `registered`, `online`, and `offline` transitions so you can audit connectivity history.
+  </Card>
+  <Card title="Site-binding routing" icon="route">
+    Bind a node to specific platforms in the UI. Tasks for those sites are automatically routed to that node without any manual selection at run time.
+  </Card>
+  <Card title="Per-node statistics" icon="chart-bar">
+    View task totals, success rate, and records collected for each node across configurable time ranges (today, 7 days, 30 days, or custom).
+  </Card>
+</CardGroup>
+
+## Benefits of distributed nodes
+
+- **NAT traversal** — agents initiate outbound WebSocket connections, so nodes behind home routers or corporate firewalls register without port forwarding.
+- **Multi-account isolation** — each node runs its own Chrome profile; logging into a platform on one node never affects another.
+- **Geographic distribution** — place agents in different regions to reduce latency or access region-locked content.
+- **Scale-out** — add new nodes at runtime through the UI; the center hot-adds them to the browser pool without a restart.
+
+<Note>
+Switching between local mode and agent mode is a global setting. When agent mode is active, all collection tasks are dispatched to registered nodes rather than the center's own Chrome instance.
+</Note>
